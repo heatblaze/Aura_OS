@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  # ── Redis: Session state + message bus ─────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: jarvis_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL: Structured user data + long-term memory ────
+  postgres:
+    image: postgres:16-alpine
+    container_name: jarvis_postgres
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: jarvis_pass
+      POSTGRES_DB: jarvis_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ChromaDB: Vector memory (semantic search) ───────────────
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: jarvis_chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  redis_data:
+  postgres_data:
+  chroma_data:
+
+# NOTE: Ollama runs on the HOST machine (not in Docker) for best performance.
+# Install: https://ollama.com/download
+# Then run: ollama pull phi3:mini
+# FastAPI backend also runs on host: uvicorn backend.main:app --reload
+# Next.js frontend: cd frontend && npm run dev
