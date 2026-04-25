@@ -2,81 +2,67 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { 
-  Mic, Trash2, Send, Activity, ChevronRight, X, Loader2, Database, Zap, Cpu, Globe, Search
-} from "lucide-react";
+import { Mic, Trash2, Send, Activity, X, Loader2, Database, Globe, Search } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { JarvisWebSocket } from "@/lib/websocket";
-import { 
-  ChatMessage, JarvisEvent, AgentLogEntry, SystemStatus, 
-  EVENT_LABELS, AGENT_COLORS, AGENT_ICONS 
-} from "@/lib/types";
-import { NebulaVisualizer, VisualizerState } from "./components/NebulaVisualizer";
+import { ChatMessage, JarvisEvent, AgentLogEntry, SystemStatus, EVENT_LABELS, AGENT_COLORS, AGENT_ICONS } from "@/lib/types";
+import { AuraOrb, VisualizerState } from "./components/NebulaVisualizer";
+
+const ACTION_CARDS = [
+  { label: "System Diagnostics", icon: Activity, desc: "Run full system health check",  color: "#00E5FF" },
+  { label: "Memory Retrieval",   icon: Database, desc: "Access cognitive data stores",   color: "#A855F7" },
+  { label: "Global Search",      icon: Globe,    desc: "Query external knowledge",       color: "#4F8EFF" },
+  { label: "Research Analysis",  icon: Search,   desc: "Deep analysis pipeline",         color: "#10B981" },
+];
 
 export default function JarvisPage() {
-  const [sessionId, setSessionId] = useState("");
-  const [isMounted, setIsMounted] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
-  const [input, setInput] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const [sessionId,      setSessionId]      = useState("");
+  const [isMounted,      setIsMounted]      = useState(false);
+  const [messages,       setMessages]       = useState<ChatMessage[]>([]);
+  const [agentLog,       setAgentLog]       = useState<AgentLogEntry[]>([]);
+  const [input,          setInput]          = useState("");
+  const [isProcessing,   setIsProcessing]   = useState(false);
+  const [isListening,    setIsListening]    = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(false);
-  const [amplitude, setAmplitude] = useState(0.5);
-  const [status, setStatus] = useState<SystemStatus>({
-    connected: false,
-    ollamaAvailable: false,
-    model: "mistral",
-    sessionId: "",
-    eventCount: 0,
+  const [amplitude,      setAmplitude]      = useState(0.5);
+  const [status,         setStatus]         = useState<SystemStatus>({
+    connected: false, ollamaAvailable: false, model: "mistral", sessionId: "", eventCount: 0,
   });
 
-  const wsRef = useRef<JarvisWebSocket | null>(null);
+  const wsRef      = useRef<JarvisWebSocket | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const visualizerState: VisualizerState = isListening ? "listening" : isProcessing ? "thinking" : "idle";
+  const visualizerState: VisualizerState =
+    isListening ? "listening" : isProcessing ? "thinking" : "idle";
 
-  useEffect(() => {
-    const id = uuidv4();
-    setSessionId(id);
-    setIsMounted(true);
-    setStatus(s => ({ ...s, sessionId: id }));
-  }, []);
+  useEffect(() => { const id = uuidv4(); setSessionId(id); setIsMounted(true); setStatus(s => ({ ...s, sessionId: id })); }, []);
 
   useEffect(() => {
     if (isListening || isProcessing) {
-      const interval = setInterval(() => setAmplitude(Math.random()), 100);
-      return () => clearInterval(interval);
-    } else {
-      setAmplitude(0.2);
+      const iv = setInterval(() => setAmplitude(Math.random()), 100);
+      return () => clearInterval(iv);
     }
+    setAmplitude(0.2);
   }, [isListening, isProcessing]);
 
   const addLogEntry = useCallback((event: JarvisEvent) => {
     const entry: AgentLogEntry = {
-      id: uuidv4(),
-      type: event.type,
-      agent: event.agent,
+      id: uuidv4(), type: event.type, agent: event.agent,
       timestamp: event.timestamp || new Date().toISOString(),
       title: EVENT_LABELS[event.type] || event.message || "System Action",
-      status: "done"
+      status: "done",
     };
     setAgentLog(prev => [...prev.slice(-100), entry]);
-    if (["agent_response", "execution_complete"].includes(event.type)) {
-      setShowRightPanel(true);
-    }
+    if (["agent_response", "execution_complete"].includes(event.type)) setShowRightPanel(true);
   }, []);
 
   useEffect(() => {
     if (!isMounted) return;
-    
     const ws = new JarvisWebSocket(sessionId);
     wsRef.current = ws;
-    ws.connect()
-      .then(() => setStatus(s => ({ ...s, connected: true })))
-      .catch(() => setStatus(s => ({ ...s, connected: false })));
-
+    ws.connect().then(() => setStatus(s => ({ ...s, connected: true }))).catch(() => setStatus(s => ({ ...s, connected: false })));
     ws.on("*", addLogEntry);
-    ws.on("pipeline_start", () => setIsProcessing(true));
+    ws.on("pipeline_start",    () => setIsProcessing(true));
     ws.on("pipeline_complete", () => setIsProcessing(false));
     return () => ws.disconnect();
   }, [sessionId, addLogEntry, isMounted]);
@@ -87,186 +73,351 @@ export default function JarvisPage() {
     setMessages(prev => [...prev, { id: uuidv4(), role: "user", content: text, timestamp: new Date().toISOString() }]);
     setIsProcessing(true);
     wsRef.current?.sendMessage(text);
-    
     try {
-      const res = await fetch("http://localhost:8000/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, session_id: sessionId })
-      });
+      const res  = await fetch("http://localhost:8000/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, session_id: sessionId }) });
       const data = await res.json();
       setMessages(prev => [...prev, { id: uuidv4(), role: "assistant", content: data.response, timestamp: new Date().toISOString() }]);
-    } catch (e) {
-      setMessages(prev => [...prev, { id: uuidv4(), role: "assistant", content: "Communication interrupt detected. Verify Neural Link status.", timestamp: new Date().toISOString() }]);
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch {
+      setMessages(prev => [...prev, { id: uuidv4(), role: "assistant", content: "Communication interrupt. Verify Neural Link.", timestamp: new Date().toISOString() }]);
+    } finally { setIsProcessing(false); }
   };
 
   return (
     <div className="flex flex-1 h-full relative overflow-hidden">
-      
-      {/* ── Neural Interface Center ── */}
       <section className="flex-1 flex flex-col items-center relative overflow-hidden">
-        
-        {/* Top Status Bar (Smaller/Centered) */}
-        <header className="w-full max-w-4xl px-8 py-8 flex items-center justify-between animate-fade-in z-50">
-          <div className="flex items-center gap-10">
-             <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2 h-2 rounded-full shadow-[0_0_8px_currentColor] animate-pulse ${status.connected ? 'text-[var(--accent-cyan)]' : 'text-red-500'}`} />
-                  <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white brightness-110">Link: {status.connected ? 'Active' : 'Offline'}</span>
-                </div>
-                <span className="text-[8px] font-bold text-[var(--text-muted)] tracking-[0.2em] ml-5 uppercase">ID: {sessionId.split('-')[0]}</span>
-             </div>
-             <div className="h-8 w-px bg-white/10" />
-             <div className="flex items-center gap-4 text-white/80">
-                <Cpu className="w-4 h-4 text-[var(--accent-cyan)]" />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">{status.model}</span>
-             </div>
-          </div>
 
-          <div className="flex items-center gap-4">
-             <button 
-               onClick={() => setShowRightPanel(!showRightPanel)} 
-               className={`p-3 rounded-xl border transition-all duration-300 group ${showRightPanel ? 'bg-[var(--accent-cyan)] text-black border-transparent' : 'border-white/10 text-[var(--text-muted)] hover:text-white'}`}
-             >
-                <Activity className="w-5 h-5" />
-             </button>
-             <button onClick={() => setMessages([])} className="p-3 rounded-xl border border-white/10 text-[var(--text-muted)] hover:text-white transition-all">
-                <Trash2 className="w-5 h-5" />
-             </button>
-          </div>
-        </header>
-
-        {/* Focus Area */}
-        <div className="flex-1 w-full relative flex items-center justify-center -translate-y-6">
-          <div className="flex flex-col items-center gap-14 w-full max-w-3xl px-8">
-            
-            {/* Visualizer Section */}
-            <div className="animate-fade-in">
-               <NebulaVisualizer state={visualizerState} amplitude={amplitude} />
+        {/* ── Top Status Bar ── */}
+        <motion.header
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-4xl px-10 py-5 flex items-center justify-between z-50"
+        >
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-3">
+              <div className={`status-dot ${!status.connected ? "!bg-red-500 !shadow-[0_0_8px_red]" : ""}`} />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.3em]" style={{ color: status.connected ? "var(--accent-cyan)" : "rgba(255,100,100,0.8)" }}>
+                {status.connected ? "Active" : "Offline"}
+              </span>
             </div>
+            <div className="h-5 w-px bg-white/10" />
+            <span className="text-[10px] font-medium text-[var(--text-muted)] tracking-[0.15em] uppercase">
+              Core: {status.model}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <motion.button
+              whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.93 }}
+              onClick={() => setShowRightPanel(!showRightPanel)}
+              className="p-3 rounded-2xl border transition-all duration-300"
+              style={{
+                borderColor: showRightPanel ? "var(--accent-cyan)" : "var(--border-card)",
+                background: showRightPanel ? "rgba(0,229,255,0.12)" : "rgba(15,25,55,0.5)",
+                color: showRightPanel ? "var(--accent-cyan)" : "var(--text-muted)",
+                boxShadow: showRightPanel ? "0 0 20px rgba(0,229,255,0.2), inset 0 1px 0 rgba(255,255,255,0.08)" : "inset 0 1px 0 rgba(255,255,255,0.05)",
+                cursor: "pointer",
+              }}
+            >
+              <Activity className="w-4 h-4" />
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.93 }}
+              onClick={() => setMessages([])}
+              className="p-3 rounded-2xl border border-[var(--border-card)] text-[var(--text-muted)] hover:text-white hover:border-white/20 transition-all"
+              style={{ background: "rgba(15,25,55,0.5)", cursor: "pointer", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)" }}
+            >
+              <Trash2 className="w-4 h-4" />
+            </motion.button>
+          </div>
+        </motion.header>
 
-            {/* Directive Action Grid (Smaller Cards) */}
-            {messages.length === 0 && (
-              <div className="grid grid-cols-2 gap-6 w-full max-w-2xl animate-fade-in" style={{ animationDelay: '0.1s' }}>
-                {[
-                  { label: "System Diagnostics", icon: Activity, desc: "Verify core stability", color: "var(--accent-cyan)" },
-                  { label: "Memory Retrieval", icon: Database, desc: "Recall context", color: "var(--accent-purple)" },
-                  { label: "Global Search", icon: Globe, desc: "Acquire datasets", color: "var(--accent-blue)" },
-                  { label: "Research Analysis", icon: Search, desc: "Synthesize data", color: "#10B981" }
-                ].map((item, i) => (
-                  <button 
-                    key={i} 
-                    onClick={() => sendMessage(item.label)}
-                    className="glass-card !p-6 flex flex-col gap-4 text-left group transition-all duration-300"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 group-hover:border-current transition-all" style={{ color: item.color }}>
-                        <item.icon className="w-5.5 h-5.5" />
-                      </div>
-                      <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-2 transition-all text-white/40" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-white mb-0.5 group-hover:text-[var(--accent-cyan)] transition-colors">{item.label}</p>
-                      <p className="text-[10px] text-[var(--text-secondary)] font-medium uppercase tracking-widest">{item.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+        {/* ── Center Focus Area ── */}
+        <div className="flex-1 w-full relative flex items-center justify-center">
+          {/* AMBIENT LIGHT — The orb casts light onto the background */}
+          <div className="orb-ambient-light" style={{ top: "10%", left: "50%", transform: "translateX(-50%)" }} />
+          {/* Secondary purple ambient light — below the orb */}
+          <div style={{
+            position: "absolute", width: 600, height: 400, borderRadius: "50%",
+            background: "radial-gradient(ellipse at center, rgba(120,50,200,0.1) 0%, rgba(80,30,160,0.05) 40%, transparent 70%)",
+            filter: "blur(70px)", pointerEvents: "none", zIndex: 0,
+            top: "45%", left: "50%", transform: "translateX(-50%)",
+          }} />
 
-            {/* Chat Flow Overlay */}
-            {messages.length > 0 && (
-              <div className="absolute inset-0 flex flex-col px-8 py-24 pointer-events-none">
-                <div className="flex-1 overflow-y-auto scrollbar-hide space-y-10 pb-32 pointer-events-auto">
-                  {messages.map((m) => (
-                    <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                      <div className={`max-w-[75%] glass-card !p-6 !rounded-[24px] ${m.role === 'user' ? 'border-[var(--accent-cyan)]/30 bg-[var(--accent-cyan)]/5' : 'border-white/10 bg-white/[0.03]'}`}>
-                        <div className="flex items-center gap-3 mb-3">
-                           <div className={`w-1.5 h-1.5 rounded-full ${m.role === 'user' ? 'bg-[var(--accent-cyan)]' : 'bg-[var(--accent-purple)]'}`} />
-                           <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">{m.role}</span>
+          <div className="flex flex-col items-center w-full max-w-5xl px-10" style={{ gap: 32 }}>
+
+            {/* AURA branding above orb — thin, elegant, serif-like */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.08 }}
+              className="text-center"
+              style={{ position: "relative", zIndex: 5 }}
+            >
+              <h1 style={{ fontSize: 64, fontWeight: 300, letterSpacing: "0.12em", marginBottom: 10 }}>
+                AURA
+              </h1>
+              <motion.p
+                animate={{ opacity: [0.45, 0.8, 0.45] }}
+                transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
+                style={{ fontSize: 12, fontWeight: 500, letterSpacing: "0.35em", textTransform: "uppercase", color: "var(--accent-cyan)" }}
+              >
+                {visualizerState === "idle" ? "Standing By" : visualizerState === "listening" ? "Actively Listening..." : visualizerState === "thinking" ? "Processing..." : "Speaking"}
+              </motion.p>
+            </motion.div>
+
+            {/* THE ORB */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.85 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+              style={{ position: "relative", zIndex: 5 }}
+            >
+              <AuraOrb state={visualizerState} amplitude={amplitude} size={360} />
+            </motion.div>
+
+            {/* ── Action Cards (empty state only) ── */}
+            <AnimatePresence mode="wait">
+              {messages.length === 0 && (
+                <motion.div
+                  key="action-cards"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                  className="grid grid-cols-4 w-full"
+                  style={{ gap: 16, position: "relative", zIndex: 5 }}
+                >
+                  {ACTION_CARDS.map((item, i) => (
+                    <motion.button
+                      key={i}
+                      onClick={() => sendMessage(item.label)}
+                      initial={{ opacity: 0, y: 16 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4, delay: 0.15 + i * 0.07, ease: [0.16, 1, 0.3, 1] }}
+                      whileHover={{ y: -6, scale: 1.025, transition: { duration: 0.25 } }}
+                      whileTap={{ scale: 0.97 }}
+                      className="glass-card text-left group"
+                      style={{ padding: "22px 20px", cursor: "pointer" }}
+                    >
+                      <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+                        <div
+                          className="flex items-center justify-center rounded-xl transition-all"
+                          style={{
+                            width: 40, height: 40,
+                            color: item.color,
+                            background: `${item.color}12`,
+                            border: `1px solid ${item.color}25`,
+                            boxShadow: `0 0 16px ${item.color}15`,
+                          }}
+                        >
+                          <item.icon className="w-[18px] h-[18px]" />
                         </div>
-                        <p className="text-[14px] leading-relaxed text-white font-medium">{m.content}</p>
                       </div>
-                    </div>
+                      <p className="text-[14px] font-semibold text-white mb-1.5 group-hover:text-[var(--accent-cyan)] transition-colors">{item.label}</p>
+                      <p className="text-[11px] text-[var(--text-muted)] font-medium leading-relaxed">{item.desc}</p>
+                    </motion.button>
                   ))}
-                  <div ref={chatEndRef} />
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* ── Chat Flow ── */}
+            <AnimatePresence>
+              {messages.length > 0 && (
+                <motion.div
+                  key="chat"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="absolute inset-0 flex flex-col px-10 py-28 pointer-events-none"
+                  style={{ zIndex: 5 }}
+                >
+                  <div className="flex-1 overflow-y-auto scrollbar-hide pb-28 pointer-events-auto" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                    {messages.map((m, idx) => (
+                      <motion.div
+                        key={m.id}
+                        initial={{ opacity: 0, y: 16 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.35, delay: idx * 0.04, ease: "easeOut" }}
+                        className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className="glass-card"
+                          style={{
+                            maxWidth: "70%",
+                            padding: "18px 22px",
+                            borderRadius: 20,
+                            borderColor: m.role === "user" ? "rgba(0,229,255,0.2)" : "var(--border-card)",
+                            background: m.role === "user"
+                              ? "linear-gradient(135deg, rgba(0,229,255,0.08) 0%, rgba(0,150,200,0.04) 100%)"
+                              : "linear-gradient(135deg, rgba(15,25,55,0.6) 0%, rgba(10,18,40,0.5) 100%)",
+                          }}
+                        >
+                          <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
+                            <div style={{
+                              width: 6, height: 6, borderRadius: "50%",
+                              background: m.role === "user" ? "var(--accent-cyan)" : "var(--accent-purple)",
+                              boxShadow: m.role === "user" ? "0 0 8px var(--accent-cyan)" : "0 0 8px var(--accent-purple)",
+                            }} />
+                            <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.25em", color: "var(--text-muted)" }}>{m.role}</span>
+                          </div>
+                          <p className="text-[14px] leading-relaxed text-white/90">{m.content}</p>
+                        </div>
+                      </motion.div>
+                    ))}
+                    <div ref={chatEndRef} />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
 
-        {/* Console Console */}
-        <footer className="w-full max-w-3xl px-8 pb-12 pt-4 animate-fade-in z-50">
-          <div className="input-container !p-2 border-white/10">
-            <button 
-              onMouseDown={() => setIsListening(true)}
-              onMouseUp={() => setIsListening(false)}
-              className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all ${isListening ? 'bg-[var(--accent-cyan)] text-black' : 'bg-white/5 text-[var(--text-muted)] hover:text-white'}`}
+        {/* ── Command Bar ── */}
+        <motion.footer
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="w-full max-w-3xl px-10 z-50"
+          style={{ paddingBottom: 20, paddingTop: 4 }}
+        >
+          <div className="input-container">
+            <motion.button
+              whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
+              onClick={() => setIsListening(p => !p)}
+              className="flex-shrink-0 flex items-center justify-center rounded-xl transition-all"
+              style={{
+                width: 44, height: 44, cursor: "pointer",
+                background: isListening ? "var(--accent-cyan)" : "rgba(15,25,55,0.7)",
+                color: isListening ? "#000" : "var(--text-muted)",
+                boxShadow: isListening ? "0 0 28px rgba(0,229,255,0.6)" : "inset 0 1px 0 rgba(255,255,255,0.05)",
+                border: isListening ? "none" : "1px solid var(--border-card)",
+              }}
             >
-              <Mic className="w-6 h-6" />
-            </button>
-            <input 
+              <Mic className="w-[18px] h-[18px]" />
+            </motion.button>
+            <input
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendMessage(input)}
-              placeholder="Neural directive..."
-              className="flex-1 bg-transparent border-none outline-none px-6 text-lg font-light text-white placeholder-white/10"
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && sendMessage(input)}
+              placeholder="Speak a directive..."
+              className="flex-1 bg-transparent border-none outline-none text-[15px] text-white placeholder-white/20"
+              style={{ padding: "0 20px", cursor: "text" }}
             />
-            <button 
+            <motion.button
+              whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}
               onClick={() => sendMessage(input)}
               disabled={!input.trim()}
-              className="w-14 h-14 rounded-xl flex items-center justify-center bg-white/5 text-[var(--text-muted)] hover:bg-[var(--accent-cyan)] hover:text-black transition-all disabled:opacity-5"
+              className="flex-shrink-0 flex items-center justify-center rounded-xl transition-all disabled:opacity-15"
+              style={{
+                width: 44, height: 44, cursor: "pointer",
+                background: "rgba(15,25,55,0.7)",
+                color: "var(--text-muted)",
+                border: "1px solid var(--border-card)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+              }}
             >
-              {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <Send className="w-6 h-6" />}
-            </button>
+              {isProcessing ? <Loader2 className="w-[18px] h-[18px] animate-spin" /> : <Send className="w-[18px] h-[18px]" />}
+            </motion.button>
           </div>
-        </footer>
+        </motion.footer>
       </section>
 
-      {/* ── System Trace Overlay ── */}
-      <aside className={`panel-right ${showRightPanel ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 shadow-none'}`}>
-        <div className="h-full flex flex-col">
-          <header className="px-8 py-8 border-b border-white/5 flex items-center justify-between bg-white/[0.01]">
-            <div className="flex items-center gap-4">
-               <Activity className="w-5 h-5 text-[var(--accent-purple)]" />
-               <div>
-                  <h3 className="text-[10px] font-black text-white m-0 tracking-[0.2em]">System Trace</h3>
-               </div>
-            </div>
-            <button onClick={() => setShowRightPanel(false)} className="text-white/20 hover:text-white p-2 transition-all">
-              <X className="w-4 h-4" />
-            </button>
-          </header>
-
-          <div className="flex-1 overflow-y-auto p-8 scrollbar-hide space-y-4">
-            {agentLog.slice().reverse().map((log) => (
-              <div key={log.id} className="animate-fade-in flex gap-4 py-4 border-b border-white/5 group hover:bg-white/[0.02] px-4 -mx-4 rounded-lg transition-all">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-[9px] font-black flex-shrink-0 border border-current" 
-                  style={{ background: `${AGENT_COLORS[log.agent || 'commander']}10`, color: AGENT_COLORS[log.agent || 'commander'] }}>
-                  {log.agent ? AGENT_ICONS[log.agent] : "SYS"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[8px] font-black uppercase tracking-[0.1em]" style={{ color: AGENT_COLORS[log.agent || 'commander'] }}>{log.agent}</span>
-                    <span className="text-[8px] text-[var(--text-muted)] font-mono">{new Date(log.timestamp).toLocaleTimeString([], { hour12: false })}</span>
+      {/* ── System Trace Panel ── */}
+      <AnimatePresence>
+        {showRightPanel && (
+          <motion.aside
+            key="right-panel"
+            initial={{ x: 400, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 400, opacity: 0 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="panel-right"
+          >
+            <div className="h-full flex flex-col">
+              <header className="px-6 py-5 border-b border-[var(--border-card)] flex items-center justify-between" style={{ background: "rgba(10,18,38,0.5)" }}>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-8 h-8 rounded-xl flex items-center justify-center"
+                    style={{
+                      background: "rgba(168,85,247,0.12)",
+                      border: "1px solid rgba(168,85,247,0.25)",
+                      boxShadow: "0 0 12px rgba(168,85,247,0.15)",
+                    }}
+                  >
+                    <Activity className="w-4 h-4 text-[var(--accent-purple)]" />
                   </div>
-                  <p className="text-[12px] text-white/90 leading-relaxed font-bold truncate">{log.title}</p>
+                  <div>
+                    <h3 style={{ fontSize: 10, margin: 0 }}>System Trace</h3>
+                    <p style={{ fontSize: 8, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.2em", marginTop: 2 }}>Real-time Events</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+                <button onClick={() => setShowRightPanel(false)} className="text-white/25 hover:text-white p-2 hover:bg-white/5 rounded-xl transition-all" style={{ cursor: "pointer" }}>
+                  <X className="w-4 h-4" />
+                </button>
+              </header>
 
-          <footer className="p-8 border-t border-white/5">
-             <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-[var(--accent-cyan)] to-[var(--accent-purple)] w-[99%] shadow-[0_0_10px_var(--accent-cyan)]" />
-             </div>
-          </footer>
-        </div>
-      </aside>
+              <div className="flex-1 overflow-y-auto scrollbar-hide" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                {agentLog.slice().reverse().map(log => (
+                  <motion.div
+                    key={log.id}
+                    initial={{ opacity: 0, x: 14 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="group relative overflow-hidden rounded-xl transition-all"
+                    style={{
+                      display: "flex", gap: 12, padding: 14,
+                      border: "1px solid var(--border-card)",
+                      background: "rgba(10,18,40,0.4)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+                    }}
+                  >
+                    <div
+                      className="absolute top-0 left-0 w-[2px] h-full rounded-r-full"
+                      style={{ backgroundColor: AGENT_COLORS[log.agent || "commander"] }}
+                    />
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-[7px] font-bold flex-shrink-0"
+                      style={{
+                        background: `${AGENT_COLORS[log.agent || "commander"]}10`,
+                        color: AGENT_COLORS[log.agent || "commander"],
+                        border: `1px solid ${AGENT_COLORS[log.agent || "commander"]}25`,
+                      }}
+                    >
+                      {log.agent ? AGENT_ICONS[log.agent] : "SYS"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[7px] font-bold uppercase tracking-[0.15em] opacity-75" style={{ color: AGENT_COLORS[log.agent || "commander"] }}>{log.agent || "SYSTEM"}</span>
+                        <span className="text-[7px] text-[var(--text-dim)] font-mono">{new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                      </div>
+                      <p className="text-[11px] text-white/70 leading-snug font-medium line-clamp-2 group-hover:text-white transition-colors">{log.title}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              <footer className="p-5 border-t border-[var(--border-card)]" style={{ background: "rgba(10,18,38,0.4)" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Neural Load</span>
+                  <span className="text-[8px] font-bold text-glow-cyan uppercase tracking-widest">99%</span>
+                </div>
+                <div className="h-1 w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{
+                      background: "linear-gradient(90deg, var(--accent-cyan), var(--accent-purple))",
+                      boxShadow: "0 0 12px var(--glow-cyan-md)",
+                    }}
+                    initial={{ width: 0 }}
+                    animate={{ width: "99%" }}
+                    transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] }}
+                  />
+                </div>
+              </footer>
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

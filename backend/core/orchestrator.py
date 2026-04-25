@@ -27,6 +27,8 @@ If an action was completed, confirm it clearly.
 If something failed, explain why and offer alternatives.
 Do NOT mention internal agent names or system details unless specifically asked."""
 
+DIRECTIVES_PROCESSED = 0
+
 
 class Orchestrator:
     def __init__(self):
@@ -41,6 +43,9 @@ class Orchestrator:
         Run the full MCP pipeline for a user message.
         Returns a dict with the final response and all intermediate results.
         """
+        global DIRECTIVES_PROCESSED
+        DIRECTIVES_PROCESSED += 1
+        
         start_time = time.monotonic()
 
         await emit(session_id, "pipeline_start", message="JARVIS activated", user_message=user_message)
@@ -193,6 +198,10 @@ Generate a helpful, conversational response to the user."""
         for agent in [self.memory_agent, self.commander, self.planner, self.executor, self.critic]:
             await agent.close()
         await intent_engine.close()
+
+
+def get_directives_processed() -> int:
+    return DIRECTIVES_PROCESSED
 
 
 # Singleton

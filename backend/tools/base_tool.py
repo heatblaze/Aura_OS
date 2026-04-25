@@ -29,6 +29,7 @@ class BaseTool(ABC):
     name: str = "base_tool"
     description: str = "Base tool"
     requires_auth: bool = False
+    is_enabled: bool = True
 
     def is_configured(self) -> bool:
         """Return True if this tool has all required credentials."""
@@ -36,6 +37,13 @@ class BaseTool(ABC):
 
     async def execute(self, params: dict) -> dict:
         """Execute the tool with given params. Returns a ToolResult dict."""
+        if not self.is_enabled:
+            return ToolResult(
+                success=False,
+                error=f"Tool '{self.name}' is currently disabled by protocol manifest.",
+                metadata={"tool": self.name, "enabled": False},
+            ).to_dict()
+
         if not self.is_configured():
             return ToolResult(
                 success=False,
@@ -60,4 +68,5 @@ class BaseTool(ABC):
             "description": self.description,
             "requires_auth": self.requires_auth,
             "configured": self.is_configured(),
+            "enabled": self.is_enabled,
         }

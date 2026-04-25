@@ -1,13 +1,24 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "./components/Sidebar";
+import { OpeningSequence } from "./components/OpeningSequence";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space",
+  weight: ["300", "400", "500", "600", "700"],
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "JARVIS AI OS — Neural Interface",
-  description: "Advanced Autonomous Agent Operating System",
+  title: "Aura OS — Cinematic AI Interface",
+  description: "A premium, cinematic AI operating system interface powered by autonomous neural agents.",
+  keywords: ["AI", "Operating System", "Neural Interface", "Aura OS"],
 };
 
 export default function RootLayout({
@@ -16,14 +27,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.variable} font-sans antialiased`}>
-        <div className="app-container">
-          <Sidebar />
-          <main className="panel-main">
-            {children}
-          </main>
-        </div>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body
+        className={`${spaceGrotesk.variable} ${inter.variable}`}
+        style={{ fontFamily: "var(--font-space), var(--font-inter), sans-serif" }}
+        suppressHydrationWarning
+      >
+        <OpeningSequence>
+          <div className="app-container">
+            <Sidebar />
+            <main className="panel-main">
+              {children}
+            </main>
+          </div>
+        </OpeningSequence>
       </body>
     </html>
   );

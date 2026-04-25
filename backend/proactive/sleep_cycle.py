@@ -70,23 +70,44 @@ class MemoryConsolidationTrigger(BaseTrigger):
 
     def should_fire(self, now: datetime) -> bool:
         local_hour = now.astimezone().hour
-        # Fire between 3:00 and 3:59 AM
-        if local_hour != self.FIRE_HOUR:
-            return False
+        
+        # If we haven't fired in memory yet (e.g. system just booted), we MUST return True 
+        # so `fire()` can check the database timestamp for catch-up.
+        if self._last_fired is None:
+            return True
             
-        if self._last_fired:
+        # Standard strict 3 AM check
+        if local_hour == self.FIRE_HOUR:
             since_last = (now - self._last_fired).total_seconds()
-            if since_last < 3600 * 20:  # not fired in last 20h
-                return False
-        return True
+            if since_last > 3600 * 20:  # Prevent double-firing at 3 AM
+                return True
+                
+        # Drift check: if it's been more than 24 hours since the last in-memory run
+        since_last = (now - self._last_fired).total_seconds()
+        if since_last > 3600 * 24:
+            return True
+            
+        return False
 
     async def fire(self, now: datetime) -> list[dict]:
         try:
-            # We don't have a rigid way to fetch *only* the last 24h of logs across all users easily 
-            # here without modifying long_term.py querying. 
-            # For Phase 4, we will fetch the default user's recent actions.
-            logs = await long_term_memory.get_recent_actions("default_user", limit=50)
+            # Fetch persistent state from Postgres
+            profile = await long_term_memory.get_or_create_profile("default_user")
+            prefs = profile.get("preferences", {})
+            last_sleep_cycle_str = prefs.get("last_sleep_cycle")
             
+            # Check if we really need to run
+            if last_sleep_cycle_str:
+                last_sleep_cycle = datetime.fromisoformat(last_sleep_cycle_str)
+                # If we ran in the last 20 hours, skip it (no catch-up needed)
+                if (now.replace(tzinfo=None) - last_sleep_cycle.replace(tzinfo=None)).total_seconds() < 3600 * 20:
+                    logger.debug("Sleep cycle catch-up skipped: already ran recently")
+                    self.mark_fired(now) # Update in-memory to prevent immediate re-checks
+                    return []
+            
+            logger.info("Executing Sleep Cycle Memory Consolidation...")
+            
+            logs = await long_term_memory.get_recent_actions("default_user", limit=50)
             patterns = await self.dreamer.compress(logs)
             
             for p in patterns:
@@ -98,9 +119,9 @@ class MemoryConsolidationTrigger(BaseTrigger):
             
             logger.info("Sleep cycle complete", patterns_found=len(patterns))
             
-            # This trigger does NOT emit a frontend suggestion asking for approval, 
-            # because it's an internal autonomous system maintenance task.
-            # However, we can return a low-intrustion notification if we wanted.
+            # Persist successful run timestamp to database
+            await long_term_memory.update_preference("default_user", "last_sleep_cycle", now.isoformat())
+            self.mark_fired(now) # Update in-memory state
             
         except Exception as e:
             logger.error("Memory consolidation failed", error=str(e))
