@@ -11,6 +11,7 @@ export class JarvisWebSocket {
   private maxReconnects = 5;
   private reconnectDelay = 2000;
   private url: string;
+  public onStatusChange?: (connected: boolean) => void;
 
   constructor(sessionId: string, baseUrl = "ws://localhost:8000") {
     this.sessionId = sessionId;
@@ -24,6 +25,7 @@ export class JarvisWebSocket {
 
         this.ws.onopen = () => {
           this.reconnectAttempts = 0;
+          this.onStatusChange?.(true);
           resolve();
         };
 
@@ -43,6 +45,7 @@ export class JarvisWebSocket {
         };
 
         this.ws.onclose = () => {
+          this.onStatusChange?.(false);
           this._dispatch("disconnected" as any, {
             type: "disconnected" as any,
             timestamp: new Date().toISOString(),
@@ -55,9 +58,13 @@ export class JarvisWebSocket {
     });
   }
 
-  send(type: string, payload: Record<string, unknown> = {}): void {
+  send(type: string | { type: string; data?: any }, payload: Record<string, unknown> = {}): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type, ...payload }));
+      if (typeof type === "object") {
+        this.ws.send(JSON.stringify(type));
+      } else {
+        this.ws.send(JSON.stringify({ type, ...payload }));
+      }
     }
   }
 

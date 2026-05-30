@@ -1,428 +1,272 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
-import { motion, useAnimation, useMotionValue, useSpring, AnimatePresence } from "framer-motion";
+import React, { useEffect, useRef, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export type VisualizerState = "idle" | "listening" | "thinking" | "speaking";
 
 interface AuraOrbProps {
   state: VisualizerState;
-  amplitude?: number; // 0–1
-  size?: number; // diameter in px, default 360
+  amplitude?: number;
+  size?: number;
+  coworker?: string;
 }
 
-/* ── State configuration ───────────────────── */
+const COWORKER_THEMES: Record<string, { color1: string; color2: string; color3: string }> = {
+  "Jarvis": { color1: "#00d4ff", color2: "#8b5cf6", color3: "#3b82f6" },
+  "Bobby":  { color1: "#8b5cf6", color2: "#ec4899", color3: "#f43f5e" }, // Energetic purple/pink
+  "Tom":    { color1: "#cbd5e1", color2: "#ffffff", color3: "#475569" }, // Steely engineer silver/white/grey
+  "Sarah":  { color1: "#10b981", color2: "#34d399", color3: "#3b82f6" }, // Warm organized green/blue
+};
+
 const STATE_CONFIG = {
-  idle: {
-    glowColor: "#00E5FF",
-    glowOpacity: 0.22,
-    pulseScale: [1, 1.05, 1],
-    pulseDuration: 4.2,
-    ring1Speed: 28,
-    ring2Speed: 18,
-    particleSpeed: 22,
-    orbBrightness: 1,
-    waveformAmplitude: 0.04,
-    label: "IDLE",
-  },
-  listening: {
-    glowColor: "#00E5FF",
-    glowOpacity: 0.38,
-    pulseScale: [1, 1.09, 1],
-    pulseDuration: 1.8,
-    ring1Speed: 20,
-    ring2Speed: 12,
-    particleSpeed: 14,
-    orbBrightness: 1.3,
-    waveformAmplitude: 0.14,
-    label: "LISTENING",
-  },
-  thinking: {
-    glowColor: "#8B5CF6",
-    glowOpacity: 0.32,
-    pulseScale: [1, 1.07, 1],
-    pulseDuration: 1.0,
-    ring1Speed: 10,
-    ring2Speed: 6,
-    particleSpeed: 7,
-    orbBrightness: 1.15,
-    waveformAmplitude: 0.08,
-    label: "THINKING",
-  },
-  speaking: {
-    glowColor: "#FFFFFF",
-    glowOpacity: 0.28,
-    pulseScale: [1, 1.12, 1],
-    pulseDuration: 0.6,
-    ring1Speed: 14,
-    ring2Speed: 9,
-    particleSpeed: 10,
-    orbBrightness: 1.5,
-    waveformAmplitude: 0.22,
-    label: "SPEAKING",
-  },
+  idle:      { glow: 0.18, speed: 0.008, waves: 5, amp: 0.12, ringSpeed: 25 },
+  listening: { glow: 0.35, speed: 0.016, waves: 7, amp: 0.22, ringSpeed: 15 },
+  thinking:  { glow: 0.28, speed: 0.025, waves: 8, amp: 0.15, ringSpeed: 8 },
+  speaking:  { glow: 0.4,  speed: 0.02,  waves: 6, amp: 0.3,  ringSpeed: 12 },
 } as const;
 
-/* ── Waveform SVG ring ──────────────────────── */
-function WaveformRing({
-  size,
-  amplitude,
-  color,
-}: {
-  size: number;
-  amplitude: number;
-  color: string;
-}) {
-  const radius = size * 0.46;
-  const cx = size / 2;
-  const cy = size / 2;
-  const points = 120;
+/* ══════════════════════════════════════════════
+   CANVAS ORB — Dynamic energy waves inside sphere
+   ══════════════════════════════════════════════ */
+function EnergyCanvas({ size, state, amplitude, theme }: { size: number; state: VisualizerState; amplitude: number; theme: { color1: string; color2: string; color3: string } }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const frameRef = useRef(0);
+  const timeRef = useRef(0);
 
-  const pathD = React.useMemo(() => {
-    const pts: string[] = [];
-    for (let i = 0; i <= points; i++) {
-      const angle = (i / points) * Math.PI * 2;
-      const wave = Math.sin(angle * 8) * amplitude * radius * 0.18;
-      const r = radius + wave;
-      const x = cx + r * Math.cos(angle);
-      const y = cy + r * Math.sin(angle);
-      pts.push(i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`);
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = size * dpr;
+    const h = size * dpr;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.scale(dpr, dpr);
+
+    const cfg = STATE_CONFIG[state];
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size * 0.38;
+    timeRef.current += cfg.speed;
+    const t = timeRef.current;
+
+    ctx.clearRect(0, 0, size, size);
+
+    // Clip to circle
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Background sphere gradient
+    const bg = ctx.createRadialGradient(cx, cy - r * 0.3, 0, cx, cy, r);
+    bg.addColorStop(0, "rgba(20,40,80,0.4)");
+    bg.addColorStop(0.6, "rgba(8,16,35,0.6)");
+    bg.addColorStop(1, "rgba(4,8,18,0.8)");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw flowing energy waves
+    const waveCount = cfg.waves;
+    const baseAmp = r * cfg.amp * (0.6 + amplitude * 0.6);
+
+    for (let w = 0; w < waveCount; w++) {
+      const phase = (w / waveCount) * Math.PI * 2;
+      const yOffset = cy + (w - waveCount / 2) * (r * 0.15);
+      const waveAmp = baseAmp * (0.5 + 0.5 * Math.sin(t * 2 + w));
+      const freq = 3 + w * 0.5;
+
+      ctx.beginPath();
+      for (let x = cx - r; x <= cx + r; x += 1) {
+        const nx = (x - (cx - r)) / (2 * r);
+        const envelope = Math.sin(nx * Math.PI);
+        const y = yOffset + Math.sin(nx * freq * Math.PI + t * 8 + phase) * waveAmp * envelope
+                          + Math.sin(nx * freq * 1.7 * Math.PI + t * 5 + phase * 2) * waveAmp * 0.3 * envelope;
+        if (x === cx - r) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+
+      const alpha = 0.15 + 0.1 * Math.sin(t * 3 + w);
+      const grad = ctx.createLinearGradient(cx - r, 0, cx + r, 0);
+      grad.addColorStop(0, "transparent");
+      grad.addColorStop(0.2, w % 2 === 0 ? theme.color1 : theme.color2);
+      grad.addColorStop(0.5, theme.color3);
+      grad.addColorStop(0.8, w % 2 === 0 ? theme.color2 : theme.color1);
+      grad.addColorStop(1, "transparent");
+
+      ctx.strokeStyle = grad;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 1.5 + Math.sin(t + w) * 0.5;
+      ctx.stroke();
     }
-    pts.push("Z");
-    return pts.join(" ");
-  }, [amplitude, radius, cx, cy]);
+
+    // Inner glow
+    ctx.globalAlpha = 1;
+    const innerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.6);
+    innerGlow.addColorStop(0, `${theme.color1}30`);
+    innerGlow.addColorStop(0.5, `${theme.color1}10`);
+    innerGlow.addColorStop(1, "transparent");
+    ctx.fillStyle = innerGlow;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.restore();
+
+    // Sphere edge highlight (outside clip)
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = `${theme.color1}25`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Top specular
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.strokeStyle = `rgba(255,255,255,${0.06 + 0.03 * Math.sin(t * 2)})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    frameRef.current = requestAnimationFrame(draw);
+  }, [size, state, amplitude, theme]);
+
+  useEffect(() => {
+    frameRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frameRef.current);
+  }, [draw]);
 
   return (
-    <svg
-      width={size}
-      height={size}
-      style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
-    >
-      <motion.path
-        d={pathD}
-        fill="none"
-        stroke={color}
-        strokeWidth={1.2}
-        strokeOpacity={0.45}
-        animate={{ pathLength: [0.95, 1, 0.95], opacity: [0.35, 0.55, 0.35] }}
-        transition={{ duration: 2.4, ease: "easeInOut", repeat: Infinity }}
-      />
-    </svg>
-  );
-}
-
-/* ── Orbital particle ───────────────────────── */
-function OrbitalParticle({
-  index,
-  total,
-  orbitRadius,
-  speed,
-  color,
-}: {
-  index: number;
-  total: number;
-  orbitRadius: number;
-  speed: number;
-  color: string;
-}) {
-  const startAngle = (index / total) * 360;
-  const size = 3 + (index % 3);
-
-  return (
-    <motion.div
-      style={{
-        position: "absolute",
-        top: "50%",
-        left: "50%",
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: color,
-        boxShadow: `0 0 ${size * 4}px ${size}px ${color}`,
-        marginTop: -size / 2,
-        marginLeft: -size / 2,
-        x: orbitRadius * Math.cos((startAngle * Math.PI) / 180),
-        y: orbitRadius * Math.sin((startAngle * Math.PI) / 180),
-        opacity: 0.6 + (index % 3) * 0.1,
-      }}
-      animate={{
-        rotate: [startAngle, startAngle + 360],
-      }}
-      transition={{
-        duration: speed,
-        ease: "linear",
-        repeat: Infinity,
-        delay: (index / total) * -speed,
-      }}
+    <canvas
+      ref={canvasRef}
+      style={{ width: size, height: size, position: "absolute", inset: 0, borderRadius: "50%", pointerEvents: "none" }}
     />
   );
 }
 
-/* ── Ripple ring (listening state) ─────────── */
-function RippleRing({
-  size,
-  color,
-  delay,
-}: {
-  size: number;
-  color: string;
-  delay: number;
+/* ── Orbital Ring ── */
+function OrbitalRing({ size, radius, speed, color, tilt, width = 1 }: {
+  size: number; radius: number; speed: number; color: string; tilt: number; width?: number;
+}) {
+  return (
+    <div style={{
+      position: "absolute", inset: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      animation: `ring-rotate ${speed}s linear infinite`,
+      transform: `rotateX(${tilt}deg) rotateY(15deg)`,
+      transformStyle: "preserve-3d",
+      pointerEvents: "none",
+    }}>
+      <svg width={size} height={size} style={{ overflow: "visible" }}>
+        <defs>
+          <linearGradient id={`rg-${tilt}`} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="transparent" />
+            <stop offset="25%" stopColor={color} stopOpacity="0.6" />
+            <stop offset="50%" stopColor={color} stopOpacity="0.15" />
+            <stop offset="75%" stopColor={color} stopOpacity="0.5" />
+            <stop offset="100%" stopColor="transparent" />
+          </linearGradient>
+        </defs>
+        <ellipse cx={size / 2} cy={size / 2} rx={radius} ry={radius * 0.35}
+          fill="none" stroke={`url(#rg-${tilt})`} strokeWidth={width} />
+      </svg>
+    </div>
+  );
+}
+
+/* ── Particle on orbit ── */
+function OrbitParticle({ size, radius, speed, delay, color, particleSize = 3 }: {
+  size: number; radius: number; speed: number; delay: number; color: string; particleSize?: number;
 }) {
   return (
     <motion.div
       style={{
-        position: "absolute",
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        border: `1px solid ${color}`,
-        top: "50%",
-        left: "50%",
-        x: "-50%",
-        y: "-50%",
+        position: "absolute", top: "50%", left: "50%",
+        width: particleSize, height: particleSize, borderRadius: "50%",
+        background: color, boxShadow: `0 0 ${particleSize * 3}px ${color}`,
+        marginTop: -particleSize / 2, marginLeft: -particleSize / 2,
       }}
-      initial={{ scale: 0.6, opacity: 0.6 }}
-      animate={{ scale: 2.2, opacity: 0 }}
-      transition={{
-        duration: 2.4,
-        ease: "easeOut",
-        repeat: Infinity,
-        delay,
+      animate={{
+        x: [radius, 0, -radius, 0, radius],
+        y: [0, radius * 0.35, 0, -radius * 0.35, 0],
+        opacity: [0.8, 0.4, 0.8, 0.4, 0.8],
       }}
+      transition={{ duration: speed, ease: "linear", repeat: Infinity, delay }}
     />
   );
 }
 
 /* ══════════════════════════════════════════════
-   AURA ORB — MAIN COMPONENT
+   MAIN ORB COMPONENT
 ══════════════════════════════════════════════ */
-export function AuraOrb({ state, amplitude = 0.5, size = 360 }: AuraOrbProps) {
+export function AuraOrb({ state, amplitude = 0.5, size = 300, coworker = "Jarvis" }: AuraOrbProps) {
   const cfg = STATE_CONFIG[state];
-  const PARTICLE_COUNT = 8;
-  const ORBIT_RADIUS = size * 0.43;
+  const theme = COWORKER_THEMES[coworker] || COWORKER_THEMES["Jarvis"];
 
   return (
-    <div
-      style={{ width: size, height: size, position: "relative" }}
-      className="select-none flex items-center justify-center"
-    >
-      {/* ── Ambient radial glow (behind everything) ── */}
+    <div style={{ width: size, height: size, position: "relative" }} className="select-none">
+      {/* Ambient glow */}
       <motion.div
         style={{
-          position: "absolute",
-          inset: -size * 0.3,
-          borderRadius: "50%",
-          background: `radial-gradient(circle, ${cfg.glowColor} 0%, transparent 65%)`,
-          filter: `blur(${size * 0.18}px)`,
-          pointerEvents: "none",
+          position: "absolute", inset: -size * 0.4, borderRadius: "50%",
+          background: `radial-gradient(circle, ${theme.color1} 0%, ${theme.color2}40 30%, transparent 65%)`,
+          filter: `blur(${size * 0.2}px)`, pointerEvents: "none",
         }}
-        animate={{
-          opacity: [cfg.glowOpacity * 0.7, cfg.glowOpacity, cfg.glowOpacity * 0.7],
-          scale: cfg.pulseScale,
-        }}
-        transition={{
-          duration: cfg.pulseDuration,
-          ease: "easeInOut",
-          repeat: Infinity,
-        }}
+        animate={{ opacity: [cfg.glow * 0.6, cfg.glow, cfg.glow * 0.6], scale: [1, 1.06, 1] }}
+        transition={{ duration: 4, ease: "easeInOut", repeat: Infinity }}
       />
 
-      {/* ── Ring 1: Slow breathing outer ring ── */}
-      <motion.div
-        style={{
-          position: "absolute",
-          inset: 0,
-          borderRadius: "50%",
-          border: "1px solid rgba(255,255,255,0.06)",
-          pointerEvents: "none",
-        }}
-        animate={{
-          rotate: 360,
-          scale: cfg.pulseScale,
-          opacity: [0.4, 0.7, 0.4],
-        }}
-        transition={{
-          rotate: { duration: cfg.ring1Speed, ease: "linear", repeat: Infinity },
-          scale: { duration: cfg.pulseDuration, ease: "easeInOut", repeat: Infinity },
-          opacity: { duration: cfg.pulseDuration, ease: "easeInOut", repeat: Infinity },
-        }}
-      />
+      {/* Orbital rings */}
+      <OrbitalRing size={size} radius={size * 0.52} speed={cfg.ringSpeed} color={theme.color1} tilt={65} width={1.2} />
+      <OrbitalRing size={size} radius={size * 0.48} speed={cfg.ringSpeed * 1.4} color={theme.color2} tilt={72} width={0.8} />
+      <OrbitalRing size={size} radius={size * 0.56} speed={cfg.ringSpeed * 0.7} color={`${theme.color1}60`} tilt={58} width={0.6} />
 
-      {/* ── Ring 2: Conic gradient rotating orbital ── */}
-      <motion.div
-        style={{
-          position: "absolute",
-          inset: size * 0.1,
-          borderRadius: "50%",
-          background: `conic-gradient(from 0deg, transparent 0deg, ${cfg.glowColor} 60deg, transparent 120deg)`,
-          opacity: 0.35,
-          pointerEvents: "none",
-        }}
-        animate={{ rotate: -360 }}
-        transition={{
-          duration: cfg.ring2Speed,
-          ease: "linear",
-          repeat: Infinity,
-        }}
-      />
+      {/* Orbit particles */}
+      {[0, 1, 2, 3, 4, 5].map(i => (
+        <OrbitParticle key={i} size={size} radius={size * (0.48 + (i % 3) * 0.04)}
+          speed={cfg.ringSpeed * (0.8 + i * 0.15)} delay={i * 1.5} color={i % 2 === 0 ? theme.color1 : theme.color2}
+          particleSize={2 + (i % 3)} />
+      ))}
 
-      {/* ── Thin inner orbit ring ── */}
-      <div
-        style={{
-          position: "absolute",
-          inset: size * 0.14,
-          borderRadius: "50%",
-          border: `1px solid rgba(255,255,255,0.05)`,
-          pointerEvents: "none",
-        }}
-      />
+      {/* Canvas energy waves */}
+      <EnergyCanvas size={size} state={state} amplitude={amplitude} theme={theme} />
 
-      {/* ── Waveform ring ── */}
-      <WaveformRing
-        size={size}
-        amplitude={state === "speaking" ? amplitude : cfg.waveformAmplitude}
-        color={cfg.glowColor}
-      />
-
-      {/* ── Orbital particles ── */}
-      <div style={{ position: "absolute", inset: 0, overflow: "visible" }}>
-        {Array.from({ length: PARTICLE_COUNT }).map((_, i) => (
-          <OrbitalParticle
-            key={i}
-            index={i}
-            total={PARTICLE_COUNT}
-            orbitRadius={ORBIT_RADIUS}
-            speed={cfg.particleSpeed + i * 1.2}
-            color={cfg.glowColor}
-          />
-        ))}
-      </div>
-
-      {/* ── Ripple rings (listening / speaking only) ── */}
-      <AnimatePresence>
-        {(state === "listening" || state === "speaking") && (
-          <>
-            <RippleRing size={size * 0.5} color={cfg.glowColor} delay={0} />
-            <RippleRing size={size * 0.5} color={cfg.glowColor} delay={0.9} />
-            <RippleRing size={size * 0.5} color={cfg.glowColor} delay={1.8} />
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* ── Nucleus — glowing core ── */}
-      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        {/* Core glow halo */}
+      {/* Center nucleus */}
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
         <motion.div
           style={{
-            position: "absolute",
-            width: size * 0.32,
-            height: size * 0.32,
-            borderRadius: "50%",
-            background: `radial-gradient(circle, ${cfg.glowColor}55 0%, ${cfg.glowColor}22 40%, transparent 70%)`,
-            filter: `blur(${size * 0.03}px)`,
-          }}
-          animate={{
-            scale: cfg.pulseScale,
-            opacity: [0.7, 1, 0.7],
-          }}
-          transition={{
-            duration: cfg.pulseDuration,
-            ease: "easeInOut",
-            repeat: Infinity,
-          }}
-        />
-
-        {/* Mid ring */}
-        <div
-          style={{
-            position: "absolute",
-            width: size * 0.22,
-            height: size * 0.22,
-            borderRadius: "50%",
-            border: `1px solid ${cfg.glowColor}40`,
-          }}
-        />
-
-        {/* White nucleus */}
-        <motion.div
-          style={{
-            position: "absolute",
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
+            width: 12, height: 12, borderRadius: "50%",
             background: "white",
-            boxShadow: `0 0 20px 6px white, 0 0 40px 12px ${cfg.glowColor}80`,
+            boxShadow: `0 0 16px 4px white, 0 0 40px 10px ${theme.color1}80, 0 0 80px 20px ${theme.color1}30`,
           }}
           animate={{
-            scale: cfg.pulseScale,
+            scale: [1, 1.15, 1],
             boxShadow: [
-              `0 0 16px 5px white, 0 0 32px 10px ${cfg.glowColor}60`,
-              `0 0 24px 8px white, 0 0 52px 16px ${cfg.glowColor}90`,
-              `0 0 16px 5px white, 0 0 32px 10px ${cfg.glowColor}60`,
+              `0 0 16px 4px white, 0 0 40px 10px ${theme.color1}60, 0 0 80px 20px ${theme.color1}20`,
+              `0 0 24px 8px white, 0 0 60px 16px ${theme.color1}90, 0 0 100px 30px ${theme.color1}40`,
+              `0 0 16px 4px white, 0 0 40px 10px ${theme.color1}60, 0 0 80px 20px ${theme.color1}20`,
             ],
           }}
-          transition={{
-            duration: cfg.pulseDuration,
-            ease: "easeInOut",
-            repeat: Infinity,
-          }}
-        />
-
-        {/* Inner cyan dot */}
-        <div
-          style={{
-            position: "absolute",
-            width: 4,
-            height: 4,
-            borderRadius: "50%",
-            background: cfg.glowColor,
-            zIndex: 2,
-          }}
+          transition={{ duration: 3, ease: "easeInOut", repeat: Infinity }}
         />
       </div>
 
-      {/* ── State label ── */}
-      <motion.div
-        key={state}
-        initial={{ opacity: 0, y: 4 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
-        transition={{ duration: 0.35, ease: "easeOut" }}
-        style={{
-          position: "absolute",
-          top: -36,
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 6,
-          pointerEvents: "none",
-        }}
-      >
-        <span
-          style={{
-            fontSize: 8,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.5em",
-            color: cfg.glowColor,
-            opacity: 0.7,
+      {/* Ripples for active states */}
+      <AnimatePresence>
+        {(state === "listening" || state === "speaking") && [0, 0.8, 1.6].map((delay, i) => (
+          <motion.div key={i} style={{
+            position: "absolute", top: "50%", left: "50%", width: size * 0.4, height: size * 0.4,
+            borderRadius: "50%", border: `1px solid ${theme.color1}`, x: "-50%", y: "-50%",
           }}
-        >
-          {cfg.label}
-        </span>
-        <div
-          style={{
-            width: 40,
-            height: 1,
-            background: `linear-gradient(90deg, transparent, ${cfg.glowColor}60, transparent)`,
-          }}
-        />
-      </motion.div>
+            initial={{ scale: 0.5, opacity: 0.6 }}
+            animate={{ scale: 2.5, opacity: 0 }}
+            transition={{ duration: 2.4, ease: "easeOut", repeat: Infinity, delay }}
+          />
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
 
-/* Re-export legacy name for compatibility */
 export const NebulaVisualizer = AuraOrb;

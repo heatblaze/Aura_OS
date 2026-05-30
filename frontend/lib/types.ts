@@ -31,6 +31,8 @@ export type EventType =
   | "auto_mode_changed"
   | "heartbeat"
   | "session_cleared"
+  | "disconnected"
+  | "final_response"
   | "error";
 
 export interface JarvisEvent {
@@ -39,6 +41,7 @@ export interface JarvisEvent {
   session_id?: string;
   agent?: AgentName;
   message?: string;
+  data?: any;
   // Dynamic additional fields
   [key: string]: unknown;
 }
@@ -78,6 +81,7 @@ export interface AgentLogEntry {
   title: string;
   detail?: string;
   status?: "thinking" | "done" | "error";
+  content?: string;
   data?: Record<string, unknown>;
 }
 

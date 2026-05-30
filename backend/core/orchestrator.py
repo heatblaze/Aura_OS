@@ -3,6 +3,8 @@ Orchestrator — the main pipeline that coordinates all 5 agents.
 Flow: Memory → Intent → Commander → Planner → Executor → Critic → Memory → Response
 """
 import time
+import os
+import json
 from typing import Optional
 import structlog
 
@@ -15,6 +17,7 @@ from backend.core.intent_engine import intent_engine
 from backend.core.tool_registry import tool_registry
 from backend.core.message_bus import emit
 from backend.memory.short_term import short_term_memory
+from backend.memory.markdown_brain import markdown_brain
 from backend.execution.simulator import simulation_engine
 
 logger = structlog.get_logger(__name__)
@@ -30,6 +33,47 @@ Do NOT mention internal agent names or system details unless specifically asked.
 DIRECTIVES_PROCESSED = 0
 
 
+def load_persona(channel: str) -> Optional[dict]:
+    """Load agent persona configuration based on channel routing."""
+    mapping = {
+        "#business-operations": "bobby.json",
+        "#engineering-trace": "tom.json",
+        "#support-tickets": "sarah.json"
+    }
+    filename = mapping.get(channel)
+    if not filename:
+        return None
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(base_dir, "backend", "config", "personas", filename)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
+def _build_system_prompt(persona: Optional[dict] = None) -> str:
+    """Build the system prompt with the current brain context and active coworker persona injected."""
+    brain_context = markdown_brain.build_context_injection(max_chars=3000)
+    
+    if persona:
+        role_prompt = f"You are {persona['name']}, the {persona['role']}. {persona['system_prompt']}"
+    else:
+        role_prompt = "You are JARVIS (AURA), an autonomous AI operating system."
+
+    return f"""{role_prompt}
+Generate a clear, helpful, concise response to the user based on the execution results.
+Be direct and actionable. Use markdown formatting when helpful.
+If an action was completed, confirm it clearly.
+If something failed, explain why and offer alternatives.
+Do NOT mention internal agent names or system details unless specifically asked.
+
+{brain_context}"""
+
+
 class Orchestrator:
     def __init__(self):
         self.memory_agent = MemoryAgent()
@@ -38,7 +82,7 @@ class Orchestrator:
         self.executor = ExecutorAgent()
         self.critic = CriticAgent()
 
-    async def process(self, user_message: str, session_id: str, user_id: str = "default_user") -> dict:
+    async def process(self, user_message: str, session_id: str, user_id: str = "default_user", channel: str = "general") -> dict:
         """
         Run the full MCP pipeline for a user message.
         Returns a dict with the final response and all intermediate results.
@@ -48,14 +92,24 @@ class Orchestrator:
         
         start_time = time.monotonic()
 
-        await emit(session_id, "pipeline_start", message="JARVIS activated", user_message=user_message)
+        persona = load_persona(channel)
+        active_agent_name = persona["name"] if persona else "Jarvis"
+
+        await emit(session_id, "pipeline_start", message=f"{active_agent_name} activated", user_message=user_message, agent=active_agent_name)
 
         try:
+            # ── Step 0: Inject Brain Context ────────────────────
+            brain_context = markdown_brain.build_context_injection(max_chars=2000)
+            await emit(session_id, "memory_retrieved", message="Brain context loaded", 
+                      data={"source": "markdown_brain", "file_count": len(markdown_brain.get_all_files())})
+
             # ── Step 1: Memory retrieval ────────────────────────
             enriched_context = await self.memory_agent.process(
                 {"user_message": user_message, "user_id": user_id},
                 session_id,
             )
+            # Inject brain context so all downstream agents can use it
+            enriched_context["brain_context"] = brain_context
 
             # ── Step 2: Intent extraction ───────────────────────
             await emit(session_id, "intent_extracting", message="Extracting intent...")
@@ -123,7 +177,7 @@ class Orchestrator:
 
             # ── Step 7: Generate response ───────────────────────
             response_text = await self._generate_response(
-                user_message, intent, execution_result, critic_verdict, session_id
+                user_message, intent, execution_result, critic_verdict, session_id, persona
             )
 
             # ── Step 8: Memory update ────────────────────────────
@@ -138,6 +192,9 @@ class Orchestrator:
             )
 
             elapsed_ms = (time.monotonic() - start_time) * 1000
+            
+            await emit(session_id, "final_response", content=response_text, agent=active_agent_name)
+            
             await emit(session_id, "pipeline_complete",
                        elapsed_ms=round(elapsed_ms),
                        response_preview=response_text[:100])
@@ -168,6 +225,7 @@ class Orchestrator:
         execution_result: dict,
         critic_verdict: dict,
         session_id: str,
+        persona: Optional[dict] = None,
     ) -> str:
         """Generate the final user-facing response using Ollama."""
         results_summary = ""
@@ -189,7 +247,7 @@ Quality assessment: {verdict} (score: {critic_verdict.get('quality_score', 'N/A'
 Generate a helpful, conversational response to the user."""
 
         try:
-            response = await self.commander.think(prompt, RESPONSE_SYSTEM_PROMPT, session_id, expect_json=False)
+            response = await self.commander.think(prompt, _build_system_prompt(persona), session_id, expect_json=False)
             return response
         except Exception as e:
             return f"I've processed your request. {results_summary or 'Let me know if you need anything else.'}"

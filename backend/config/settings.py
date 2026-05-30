@@ -39,6 +39,20 @@ class Settings(BaseSettings):
     # SerpAPI for web search (optional, falls back to DuckDuckGo)
     SERPAPI_KEY: Optional[str] = None
 
+    # ElevenLabs (optional Text-to-Speech integration)
+    ELEVENLABS_API_KEY: Optional[str] = None
+    ELEVENLABS_VOICE_ID: Optional[str] = "21m00Tcm4TlvDq8ikWAM" # Default: Rachel
+
+    # TTS Settings
+    TTS_PROVIDER: str = "edge-tts" # "edge-tts" (free neural), "elevenlabs" (paid premium)
+    EDGE_TTS_VOICE: str = "en-US-AriaNeural" # Default high quality free voice
+
+
+    # Groq Cloud LLM (optional)
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: Optional[str] = "llama-3.3-70b-versatile"
+    LLM_PROVIDER: str = "groq" # "groq" to use Groq API, "ollama" to force local Qwen 2.5
+
     # Security
     SECRET_KEY: str = "change-me-in-production-please"
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

@@ -9,6 +9,7 @@ import httpx
 import structlog
 
 from backend.config.settings import settings
+from backend.core.llm_client import llm_client
 
 logger = structlog.get_logger(__name__)
 
@@ -49,13 +50,10 @@ Extract ALL relevant entities (names, dates, times, locations, topics, etc.)"""
 
 class IntentEngine:
     def __init__(self):
-        self._client = httpx.AsyncClient(
-            base_url=settings.OLLAMA_BASE_URL,
-            timeout=settings.OLLAMA_TIMEOUT,
-        )
+        pass
 
     async def close(self):
-        await self._client.aclose()
+        pass
 
     async def extract(self, user_message: str, conversation_history: Optional[list] = None) -> dict:
         """
@@ -72,21 +70,19 @@ class IntentEngine:
 
 Extract the intent. Return ONLY the JSON object, no other text."""
 
+        messages = [
+            {"role": "system", "content": INTENT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+
         try:
-            response = await self._client.post(
-                "/api/chat",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "messages": [
-                        {"role": "system", "content": INTENT_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.0, "num_predict": 512},
-                },
+            content = await llm_client.think(
+                messages=messages,
+                temperature=0.0,
+                json_mode=True,
+                agent_name="Intent",
+                agent_desc="Intent Extractor"
             )
-            response.raise_for_status()
-            content = response.json()["message"]["content"]
             intent = self._parse_intent(content)
         except Exception as e:
             logger.warning("Intent extraction failed, using fallback", error=str(e))
@@ -141,10 +137,11 @@ Extract the intent. Return ONLY the JSON object, no other text."""
     async def check_ollama(self) -> dict:
         """Check if Ollama is running and which models are available."""
         try:
-            response = await self._client.get("/api/tags", timeout=5)
-            data = response.json()
-            models = [m["name"] for m in data.get("models", [])]
-            return {"available": True, "models": models}
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=5)
+                data = response.json()
+                models = [m["name"] for m in data.get("models", [])]
+                return {"available": True, "models": models}
         except Exception as e:
             return {"available": False, "error": str(e), "models": []}
 

@@ -11,7 +11,7 @@ import httpx
 import structlog
 
 from backend.config.settings import settings
-from backend.core.message_bus import emit
+from backend.core.llm_client import llm_client
 
 logger = structlog.get_logger(__name__)
 
@@ -19,20 +19,17 @@ logger = structlog.get_logger(__name__)
 class BaseAgent(ABC):
     """
     Abstract base for all Jarvis agents.
-    Each agent has a name, a system prompt, and calls Ollama for reasoning.
+    Each agent has a name, a system prompt, and calls local LLM or Groq Cloud for reasoning.
     """
 
     name: str = "base_agent"
     description: str = "Base agent"
 
     def __init__(self):
-        self._client = httpx.AsyncClient(
-            base_url=settings.OLLAMA_BASE_URL,
-            timeout=settings.OLLAMA_TIMEOUT,
-        )
+        pass
 
     async def close(self):
-        await self._client.aclose()
+        pass
 
     # ── Core LLM call ──────────────────────────────────────────
 
@@ -44,49 +41,22 @@ class BaseAgent(ABC):
         expect_json: bool = True,
     ) -> str:
         """
-        Call Ollama and return the response text.
-        Emits 'agent_thinking' event before calling, 'agent_response' after.
+        Call local LLM or Groq Cloud and return the response text.
         """
-        if session_id:
-            await emit(session_id, "agent_thinking", agent=self.name, message=f"{self.description} is reasoning...")
-
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
-            "model": settings.OLLAMA_MODEL,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": 0.1 if expect_json else 0.7,
-                "num_predict": 2048,
-            },
-        }
-
-        try:
-            response = await self._client.post("/api/chat", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            content = data["message"]["content"]
-
-            if session_id:
-                await emit(session_id, "agent_response", agent=self.name, content=content[:500])
-
-            return content
-        except httpx.TimeoutException:
-            logger.error("Ollama timeout", agent=self.name)
-            raise RuntimeError(f"LLM timeout — is Ollama running? (ollama serve)")
-        except httpx.HTTPStatusError as e:
-            # Try fallback model
-            if settings.OLLAMA_FALLBACK_MODEL != settings.OLLAMA_MODEL:
-                logger.warning("Primary model failed, trying fallback", fallback=settings.OLLAMA_FALLBACK_MODEL)
-                payload["model"] = settings.OLLAMA_FALLBACK_MODEL
-                response = await self._client.post("/api/chat", json=payload)
-                response.raise_for_status()
-                return response.json()["message"]["content"]
-            raise RuntimeError(f"Ollama error: {e}")
+        temp = 0.1 if expect_json else 0.7
+        return await llm_client.think(
+            messages=messages,
+            temperature=temp,
+            json_mode=expect_json,
+            session_id=session_id,
+            agent_name=self.name,
+            agent_desc=self.description
+        )
 
     async def think_json(
         self,

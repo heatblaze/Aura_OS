@@ -6,13 +6,16 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import httpx
+import edge_tts
 
 from backend.config.settings import settings
 from backend.core.message_bus import message_bus
@@ -24,14 +27,16 @@ from backend.core.auto_mode import auto_mode_manager
 from backend.memory.short_term import short_term_memory
 from backend.memory.long_term import long_term_memory
 from backend.memory.knowledge import knowledge_memory
+from backend.memory.markdown_brain import markdown_brain
 from backend.proactive.engine import proactive_engine
+from backend.proactive.learned_experience import experience_compiler
 
 logger = structlog.get_logger(__name__)
 
 
 # ── Lifecycle ──────────────────────────────────────────────────
 
-SYSTEM_START_TIME = datetime.utcnow()
+SYSTEM_START_TIME = datetime.now(timezone.utc)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -59,10 +64,12 @@ async def lifespan(app: FastAPI):
 
     # Start Proactive Engine
     await proactive_engine.start()
+    await experience_compiler.start()
     logger.info("JARVIS ready — Phase 3 Proactive Engine active")
     yield
 
     # Shutdown
+    await experience_compiler.stop()
     await proactive_engine.stop()
     logger.info("JARVIS shutting down...")
     await orchestrator.close()
@@ -95,6 +102,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     user_id: str = "default_user"
+    channel: str = "general"
 
 
 class ChatResponse(BaseModel):
@@ -112,7 +120,7 @@ async def root():
         "name": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "operational",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -127,7 +135,7 @@ async def health():
             "tools_configured": tool_registry.list_configured(),
         },
         "model": settings.OLLAMA_MODEL,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -135,7 +143,7 @@ async def health():
 async def chat(request: ChatRequest):
     """REST endpoint for single-turn chat (non-streaming)."""
     session_id = request.session_id or str(uuid.uuid4())
-    result = await orchestrator.process(request.message, session_id, request.user_id)
+    result = await orchestrator.process(request.message, session_id, request.user_id, request.channel)
     return ChatResponse(
         session_id=session_id,
         response=result.get("response", "No response generated"),
@@ -169,11 +177,46 @@ async def memory_stats():
         "tools": tool_registry.list_configured(),
     }
 
+
+# ── Markdown Brain Endpoints ────────────────────────────
+
+@app.get("/brain")
+async def list_brain_files():
+    """List all markdown brain files with metadata."""
+    return {"files": markdown_brain.get_all_files()}
+
+
+@app.get("/brain/graph")
+async def brain_graph():
+    """Get graph data (nodes + edges) representing the brain memory network."""
+    return markdown_brain.get_graph_data()
+
+
+@app.get("/brain/{name}")
+async def get_brain_file(name: str):
+    """Get the content of a specific brain file."""
+    content = markdown_brain.get_file(name)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"Brain file '{name}.md' not found")
+    return {"name": name, "content": content}
+
+
+class BrainAppendRequest(BaseModel):
+    section: str
+    content: str
+
+
+@app.post("/brain/{name}/append")
+async def append_to_brain_file(name: str, request: BrainAppendRequest):
+    """Append a new entry to a section in a brain file."""
+    markdown_brain.append_to_file(name, request.section, request.content)
+    return {"status": "ok", "file": name, "section": request.section}
+
 @app.get("/system/stats")
 async def system_stats():
     """Return real-time system diagnostic stats for the Dashboard."""
     # Uptime in seconds
-    uptime_seconds = (datetime.utcnow() - SYSTEM_START_TIME).total_seconds()
+    uptime_seconds = (datetime.now(timezone.utc) - SYSTEM_START_TIME).total_seconds()
     
     # Calculate a rough neural load based on queue/active states (placeholder logic for now)
     # We'll just return a dynamic simulated load between 10-30% for effect if idle, higher if processing.
@@ -306,6 +349,112 @@ async def google_callback(state: str, code: str):
         raise HTTPException(status_code=400, detail="Failed to connect Google Account.")
 
 
+# ── Text-to-Speech (TTS) Endpoints ─────────────────────────────
+
+# Mapping ElevenLabs Voice IDs to high-quality Microsoft Edge-TTS Neural Voices
+VOICE_MAPPING = {
+    # Default Rachel (Female) -> en-US-AriaNeural
+    "21m00Tcm4TlvDq8ikWAM": "en-US-AriaNeural",
+    # Sarah (Support - Warm Female) -> en-US-EmmaNeural
+    "zGjIP4SZlMnY9m93k97r": "en-US-EmmaNeural",
+    # Tom (Systems Engineer - Precise Male) -> en-US-GuyNeural
+    "c3QefzBhE1Cx4Yl23IV3": "en-US-GuyNeural",
+    # Bobby (Growth - Energetic Male) -> en-US-ChristopherNeural
+    "86ZLAUcyPNBrbdJKn3u6": "en-US-ChristopherNeural",
+    # Default voice ID in some configs -> en-US-AriaNeural
+    "GoGUcAZovo4MFeLxJdZd": "en-US-AriaNeural"
+}
+
+class TTSRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
+@app.get("/api/tts/config")
+async def tts_config():
+    """Check if TTS is configured and what the active provider is."""
+    provider = getattr(settings, "TTS_PROVIDER", "edge-tts")
+    return {
+        "available": True, # Edge-TTS is always available for free!
+        "provider": provider,
+        "voice_id": settings.ELEVENLABS_VOICE_ID if provider == "elevenlabs" else getattr(settings, "EDGE_TTS_VOICE", "en-US-AriaNeural"),
+    }
+
+
+@app.post("/api/tts")
+async def text_to_speech(request: TTSRequest):
+    """
+    Generate speech audio from text using either Edge-TTS (Free) or ElevenLabs (Paid).
+    If ElevenLabs is selected but fails, it automatically falls back to Edge-TTS.
+    """
+    provider = getattr(settings, "TTS_PROVIDER", "edge-tts")
+    
+    # 1. Check if we should attempt ElevenLabs
+    attempt_elevenlabs = (provider == "elevenlabs" and bool(settings.ELEVENLABS_API_KEY))
+    
+    if attempt_elevenlabs:
+        try:
+            voice_id = request.voice_id or settings.ELEVENLABS_VOICE_ID or "21m00Tcm4TlvDq8ikWAM"
+            url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+
+            headers = {
+                "xi-api-key": settings.ELEVENLABS_API_KEY,
+                "Content-Type": "application/json",
+                "accept": "audio/mpeg",
+            }
+
+            payload = {
+                "text": request.text,
+                "model_id": "eleven_flash_v2_5",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75,
+                },
+            }
+
+            async def elevenlabs_streamer():
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("POST", url, json=payload, headers=headers, timeout=10.0) as response:
+                        if response.status_code != 200:
+                            error_detail = await response.aread()
+                            logger.error(
+                                "ElevenLabs API error response",
+                                status_code=response.status_code,
+                                detail=error_detail.decode(errors="ignore"),
+                            )
+                            raise Exception(f"ElevenLabs error: {response.status_code}")
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+
+            # Return StreamingResponse immediately if it successfully starts
+            return StreamingResponse(elevenlabs_streamer(), media_type="audio/mpeg")
+            
+        except Exception as e:
+            logger.error("ElevenLabs failed or was blocked, falling back to free Edge-TTS", error=str(e))
+            # Fall back to Edge-TTS execution
+            pass
+
+    # 2. Free / Fallback Provider: Edge-TTS
+    voice_id = request.voice_id or getattr(settings, "EDGE_TTS_VOICE", "en-US-AriaNeural")
+    
+    # Map ElevenLabs Voice ID to Microsoft Neural voice if necessary
+    mapped_voice = VOICE_MAPPING.get(voice_id, voice_id)
+    # Ensure it's a valid Microsoft Voice format (e.g. en-US-AriaNeural)
+    if not (mapped_voice.startswith("en-") or "-" in mapped_voice):
+        mapped_voice = getattr(settings, "EDGE_TTS_VOICE", "en-US-AriaNeural")
+
+    async def edge_tts_streamer():
+        try:
+            communicate = edge_tts.Communicate(request.text, mapped_voice)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    yield chunk["data"]
+        except Exception as e:
+            logger.error("Edge-TTS streaming failed", error=str(e))
+
+    return StreamingResponse(edge_tts_streamer(), media_type="audio/mpeg")
+
+
 # ── WebSocket Endpoint ─────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
@@ -327,8 +476,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     await websocket.send_json({
         "type": "connected",
         "session_id": session_id,
-        "message": f"JARVIS online. Model: {settings.OLLAMA_MODEL}",
-        "timestamp": datetime.utcnow().isoformat(),
+        "message": "Neural connection established. AURA Core is online. Standby for directives, Operator.",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
     # Task: forward events from queue → WebSocket
@@ -340,7 +489,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             except asyncio.TimeoutError:
                 # Send heartbeat
                 try:
-                    await websocket.send_json({"type": "heartbeat", "timestamp": datetime.utcnow().isoformat()})
+                    await websocket.send_json({"type": "heartbeat", "timestamp": datetime.now(timezone.utc).isoformat()})
                 except Exception:
                     break
             except Exception:
@@ -363,13 +512,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             if msg_type == "message":
                 user_message = data.get("content", "").strip()
                 user_id = data.get("user_id", "default_user")
+                channel = data.get("channel", "general")
 
                 if not user_message:
                     continue
 
                 # Run orchestrator in background (events stream via message_bus)
                 asyncio.create_task(
-                    orchestrator.process(user_message, session_id, user_id)
+                    orchestrator.process(user_message, session_id, user_id, channel)
                 )
 
             elif msg_type == "ping":
