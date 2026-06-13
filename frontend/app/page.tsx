@@ -143,9 +143,9 @@ export default function JarvisPage() {
         // Smoothly interpolate playback rate
         currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * 0.15;
 
-        // Clamp to end if playing forward
-        if (vid.currentTime >= vid.duration - 0.05) {
-          vid.currentTime = vid.duration - 0.05;
+        // Clamp to end if playing forward or near the end
+        if (vid.currentTime >= vid.duration - 0.1) {
+          vid.currentTime = vid.duration - 0.1;
           if (!vid.paused) {
             vid.pause();
           }
@@ -157,10 +157,20 @@ export default function JarvisPage() {
 
         // Forward scrubbing: Use native GPU-accelerated video playback (silky smooth)
         if (currentPlaybackRate > 0.05) {
-          if (vid.paused) {
-            vid.play().catch(() => {});
+          // Double-check clamp to prevent any play() calls when near the end
+          if (vid.currentTime >= vid.duration - 0.1) {
+            vid.currentTime = vid.duration - 0.1;
+            if (!vid.paused) {
+              vid.pause();
+            }
+            currentPlaybackRate = 0;
+            targetPlaybackRate = 0;
+          } else {
+            if (vid.paused) {
+              vid.play().catch(() => {});
+            }
+            vid.playbackRate = Math.min(3.0, currentPlaybackRate);
           }
-          vid.playbackRate = Math.min(3.0, currentPlaybackRate);
         }
         // Backward scrubbing: Use manual frame seeking (reverse is not natively supported)
         else if (currentPlaybackRate < -0.05) {
@@ -183,7 +193,7 @@ export default function JarvisPage() {
         const progress = vid.currentTime / vid.duration;
         setVideoProgress(progress);
 
-        if (progress >= 0.98) {
+        if (vid.currentTime >= vid.duration - 0.15) {
           setWelcomeEnded(true);
         } else {
           setWelcomeEnded(false);
