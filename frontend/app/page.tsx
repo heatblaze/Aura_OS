@@ -1009,7 +1009,7 @@ export default function JarvisPage() {
             {/* Interactive video tag - full screen cover */}
             <video
               ref={videoRef}
-              src="/welcome.mp4"
+              src={process.env.NEXT_PUBLIC_VIDEO_URL || "/welcome.mp4"}
               playsInline
               muted
               preload="auto"
