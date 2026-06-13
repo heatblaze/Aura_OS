@@ -124,8 +124,10 @@ export default function JarvisPage() {
   useEffect(() => {
     if (!showWelcome) return;
 
-    let targetTime = 0;
+    let targetPlaybackRate = 0;
+    let currentPlaybackRate = 0;
     let animationId: number;
+    let decayTimer: any = null;
     const video = videoRef.current;
 
     // Reset video state
@@ -138,10 +140,29 @@ export default function JarvisPage() {
     const updatePlayback = () => {
       const vid = videoRef.current;
       if (vid && vid.duration && !isNaN(vid.duration)) {
-        // Smoothly interpolate current time toward target time
-        const diff = targetTime - vid.currentTime;
-        if (Math.abs(diff) > 0.005) {
-          vid.currentTime = Math.min(vid.duration - 0.02, Math.max(0.0, vid.currentTime + diff * 0.18));
+        // Smoothly interpolate playback rate
+        currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * 0.15;
+
+        // Forward scrubbing: Use native GPU-accelerated video playback (silky smooth)
+        if (currentPlaybackRate > 0.05) {
+          if (vid.paused) {
+            vid.play().catch(() => {});
+          }
+          vid.playbackRate = Math.min(3.0, currentPlaybackRate);
+        }
+        // Backward scrubbing: Use manual frame seeking (reverse is not natively supported)
+        else if (currentPlaybackRate < -0.05) {
+          if (!vid.paused) {
+            vid.pause();
+          }
+          vid.currentTime = Math.max(0.0, vid.currentTime + currentPlaybackRate * 0.05);
+        }
+        // Stopped: Pause the video
+        else {
+          currentPlaybackRate = 0;
+          if (!vid.paused) {
+            vid.pause();
+          }
         }
 
         // Keep progress bar updated
@@ -161,19 +182,29 @@ export default function JarvisPage() {
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const vid = videoRef.current;
-      if (!vid) return;
+      
+      // Reset decay timer on active scroll
+      if (decayTimer) clearTimeout(decayTimer);
 
-      // Calculate new target time based on scroll delta
-      // e.deltaY > 0 is scroll down (forward), e.deltaY < 0 is scroll up (backward)
-      const scrollStep = 0.08; // seconds to scrub per scroll tick (adjust for sensitivity)
-      targetTime = Math.min(vid.duration - 0.02, Math.max(0.0, targetTime + (e.deltaY > 0 ? scrollStep : -scrollStep)));
+      if (e.deltaY > 0) {
+        // Scroll down: increase forward speed
+        targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.35);
+      } else {
+        // Scroll up: trigger backward speed
+        targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.35);
+      }
+
+      // Smoothly decay to zero when scrolling stops
+      decayTimer = setTimeout(() => {
+        targetPlaybackRate = 0;
+      }, 120);
     };
 
     window.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
       window.removeEventListener("wheel", handleWheel);
       cancelAnimationFrame(animationId);
+      if (decayTimer) clearTimeout(decayTimer);
     };
   }, [showWelcome]);
 
