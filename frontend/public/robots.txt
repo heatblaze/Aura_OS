@@ -2,4 +2,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://aura-os.vercel.app/sitemap.xml
+Sitemap: https://aura-os-cyan-ten.vercel.app/sitemap.xml
