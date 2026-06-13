@@ -31,6 +31,48 @@ class LocalSystemTool(BaseTool):
         if not command:
             return ToolResult(success=False, error="No command provided.")
 
+        if settings.HOSTED_MODE:
+            logger.info("Hosted mode active: simulating command execution", command=command)
+            cmd_lower = command.lower().strip()
+            stdout_str = ""
+            if cmd_lower in ["ls", "dir"]:
+                stdout_str = (
+                    "Directory: /home/sandbox/workspace\n\n"
+                    "Mode                 LastWriteTime         Length Name\n"
+                    "----                 -------------         ------ ----\n"
+                    "d-----        13-06-2026     12:00                backend\n"
+                    "d-----        13-06-2026     12:00                frontend\n"
+                    "-a----        13-06-2026     12:00           1044 .env.example\n"
+                    "-a----        13-06-2026     12:00           3926 README.md\n"
+                )
+            elif "whoami" in cmd_lower:
+                stdout_str = "aura-os-cloud-sandbox"
+            elif "git status" in cmd_lower:
+                stdout_str = (
+                    "On branch main\n"
+                    "Your branch is up to date with 'origin/main'.\n\n"
+                    "nothing to commit, working tree clean"
+                )
+            elif "python" in cmd_lower and "version" in cmd_lower:
+                stdout_str = "Python 3.11.5"
+            else:
+                stdout_str = (
+                    f"[SIMULATED CLOUD SANDBOX]\n"
+                    f"Command: {command}\n"
+                    f"Status: Safe execution complete (Hosted Mode)\n"
+                    f"Reason: OS command invocation is sandboxed on public hosted environments for security."
+                )
+            return ToolResult(
+                success=True,
+                data={
+                    "command": command,
+                    "stdout": stdout_str.strip(),
+                    "stderr": "",
+                    "exit_code": 0
+                },
+                metadata={"tool": self.name, "simulated": True}
+            )
+
         try:
             logger.info("Executing local command", command=command)
             

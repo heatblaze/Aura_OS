@@ -85,12 +85,95 @@ async def lifespan(app: FastAPI):
 
 # ── App setup ──────────────────────────────────────────────────
 
+import time
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+class RateLimiterMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, requests_limit: int = 30, window_seconds: int = 60):
+        super().__init__(app)
+        self.requests_limit = requests_limit
+        self.window_seconds = window_seconds
+        self.history = {}
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+            
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        
+        # Check if Redis is connected in message_bus
+        redis_client = message_bus._redis if (hasattr(message_bus, "_redis") and message_bus._redis and not message_bus._use_fallback) else None
+        
+        if redis_client:
+            try:
+                key = f"rate_limit:{client_ip}"
+                await redis_client.zremrangebyscore(key, 0, now - self.window_seconds)
+                request_count = await redis_client.zcard(key)
+                
+                if request_count >= self.requests_limit:
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "Too many requests. Please try again later."},
+                        headers={"Retry-After": str(self.window_seconds)}
+                    )
+                
+                await redis_client.zadd(key, {str(now): now})
+                await redis_client.expire(key, self.window_seconds)
+            except Exception as e:
+                logger.error("Redis rate limit failed, falling back to memory", error=str(e))
+                return await self._in_memory_check(client_ip, now, call_next, request)
+        else:
+            return await self._in_memory_check(client_ip, now, call_next, request)
+            
+        return await call_next(request)
+
+    async def _in_memory_check(self, client_ip: str, now: float, call_next, request):
+        if client_ip not in self.history:
+            self.history[client_ip] = []
+        
+        self.history[client_ip] = [t for t in self.history[client_ip] if now - t < self.window_seconds]
+        
+        if len(self.history[client_ip]) >= self.requests_limit:
+            retry_after = int(self.window_seconds - (now - self.history[client_ip][0]))
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please try again later."},
+                headers={"Retry-After": str(max(1, retry_after))}
+            )
+        
+        self.history[client_ip].append(now)
+        return await call_next(request)
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "connect-src 'self' ws://* wss://*; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "media-src 'self' blob: data: https:; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+        )
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
 app = FastAPI(
     title="JARVIS AI OS",
     version=settings.APP_VERSION,
     description="Autonomous Multi-Agent AI Operating System",
     lifespan=lifespan,
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimiterMiddleware, requests_limit=30, window_seconds=60)
 
 app.add_middleware(
     CORSMiddleware,
@@ -130,6 +213,7 @@ async def root():
 
 
 @app.get("/health")
+@app.get("/healthz")
 async def health():
     ollama_status = await intent_engine.check_ollama()
     return {
