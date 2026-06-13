@@ -5,7 +5,7 @@ import { Search, Brain, Link2, Layers, HardDrive, RefreshCw, FileText, Clock, Ar
 import { motion, AnimatePresence } from "framer-motion";
 import { NeuralBrainGraph, BrainGraphFallback, BrainNode, BrainEdge } from "../components/NeuralBrainGraph";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") : "http://localhost:8000";
 
 interface BrainFile {
   name: string;

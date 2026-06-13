@@ -13,9 +13,10 @@ export class JarvisWebSocket {
   private url: string;
   public onStatusChange?: (connected: boolean) => void;
 
-  constructor(sessionId: string, baseUrl = "ws://localhost:8000", gender = "sir") {
+  constructor(sessionId: string, baseUrl?: string, gender = "sir") {
     this.sessionId = sessionId;
-    this.url = `${baseUrl}/ws/${sessionId}?gender=${gender}`;
+    const finalBaseUrl = baseUrl || (typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000") : "ws://localhost:8000");
+    this.url = `${finalBaseUrl}/ws/${sessionId}?gender=${gender}`;
   }
 
   connect(): Promise<void> {

@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { Activity, Brain, HardDrive, Clock, Cpu, Shield, BarChart3, Zap, ArrowRight, ArrowUpRight } from "lucide-react";
 import { motion } from "framer-motion";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000") : "http://localhost:8000";
 
 interface SystemStats {
   uptime_str: string;

@@ -409,12 +409,13 @@ export default function JarvisPage() {
     };
     const voiceId = voiceMap[agentName.toLowerCase()] || voiceMap["jarvis"];
 
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
-      const configRes = await fetch("http://localhost:8000/api/tts/config");
+      const configRes = await fetch(`${apiBase}/api/tts/config`);
       const config = await configRes.json();
 
       if (config.available) {
-        const ttsRes = await fetch("http://localhost:8000/api/tts", {
+        const ttsRes = await fetch(`${apiBase}/api/tts`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: cleanText, voice_id: voiceId }),
@@ -555,7 +556,8 @@ export default function JarvisPage() {
     if (!isMounted) return;
     const fetchStats = async () => {
       try {
-        const res = await fetch("http://localhost:8000/system/stats");
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const res = await fetch(`${apiBase}/system/stats`);
         if (res.ok) {
           const data = await res.json();
           setLiveStats(data);

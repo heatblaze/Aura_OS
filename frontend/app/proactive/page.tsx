@@ -8,7 +8,8 @@ export default function ProactivePage() {
   const [status, setStatus] = useState<any>(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/proactive/status")
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    fetch(`${apiBase}/proactive/status`)
       .then(r => r.json())
       .then(data => setStatus(data))
       .catch(console.error);
