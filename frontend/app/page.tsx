@@ -143,6 +143,18 @@ export default function JarvisPage() {
         // Smoothly interpolate playback rate
         currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * 0.15;
 
+        // Clamp to end if playing forward
+        if (vid.currentTime >= vid.duration - 0.05) {
+          vid.currentTime = vid.duration - 0.05;
+          if (!vid.paused) {
+            vid.pause();
+          }
+          if (currentPlaybackRate > 0) {
+            currentPlaybackRate = 0;
+            targetPlaybackRate = 0;
+          }
+        }
+
         // Forward scrubbing: Use native GPU-accelerated video playback (silky smooth)
         if (currentPlaybackRate > 0.05) {
           if (vid.paused) {
@@ -155,7 +167,9 @@ export default function JarvisPage() {
           if (!vid.paused) {
             vid.pause();
           }
-          vid.currentTime = Math.max(0.0, vid.currentTime + currentPlaybackRate * 0.05);
+          if (!vid.seeking) {
+            vid.currentTime = Math.max(0.0, vid.currentTime + currentPlaybackRate * 0.04);
+          }
         }
         // Stopped: Pause the video
         else {
@@ -186,12 +200,20 @@ export default function JarvisPage() {
       // Reset decay timer on active scroll
       if (decayTimer) clearTimeout(decayTimer);
 
-      if (e.deltaY > 0) {
-        // Scroll down: increase forward speed
-        targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.35);
-      } else {
-        // Scroll up: trigger backward speed
-        targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.35);
+      const vid = videoRef.current;
+      if (vid && vid.duration && !isNaN(vid.duration)) {
+        if (e.deltaY > 0) {
+          // Scroll down: increase forward speed only if we haven't reached the end
+          if (vid.currentTime < vid.duration - 0.05) {
+            targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.35);
+          } else {
+            targetPlaybackRate = 0;
+            currentPlaybackRate = 0;
+          }
+        } else {
+          // Scroll up: trigger backward speed
+          targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.35);
+        }
       }
 
       // Smoothly decay to zero when scrolling stops
