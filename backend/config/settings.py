@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # Ollama (free local LLM)
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     OLLAMA_MODEL: str = "phi3:mini"           # ~2.3GB RAM — good for 12GB systems
     OLLAMA_FALLBACK_MODEL: str = "llama3.2:3b" # Alternative if phi3 not installed
     OLLAMA_TIMEOUT: int = 120                  # seconds
@@ -43,15 +43,22 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: Optional[str] = None
     ELEVENLABS_VOICE_ID: Optional[str] = "21m00Tcm4TlvDq8ikWAM" # Default: Rachel
 
+    # Deepgram (optional Text-to-Speech integration)
+    DEEPGRAM_API_KEY: Optional[str] = None
+
     # TTS Settings
-    TTS_PROVIDER: str = "edge-tts" # "edge-tts" (free neural), "elevenlabs" (paid premium)
+    TTS_PROVIDER: str = "edge-tts" # "edge-tts" (free neural), "elevenlabs" (paid premium), "deepgram" (paid premium)
     EDGE_TTS_VOICE: str = "en-US-AriaNeural" # Default high quality free voice
+    TTS_SPEED: str = "+12%"                  # Speed of Edge-TTS voice (e.g. "+10%" or "-10%")
 
 
     # Groq Cloud LLM (optional)
     GROQ_API_KEY: Optional[str] = None
     GROQ_MODEL: Optional[str] = "llama-3.3-70b-versatile"
     LLM_PROVIDER: str = "groq" # "groq" to use Groq API, "ollama" to force local Qwen 2.5
+
+    # NVIDIA Cloud LLM (optional fallback)
+    NVIDIA_API_KEY: Optional[str] = None
 
     # Security
     SECRET_KEY: str = "change-me-in-production-please"

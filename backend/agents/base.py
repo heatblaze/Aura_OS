@@ -7,7 +7,9 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
+# pyrefly: ignore [missing-import]
 import httpx
+# pyrefly: ignore [missing-import]
 import structlog
 
 from backend.config.settings import settings
@@ -96,7 +98,9 @@ class BaseAgent(ABC):
 
         # Try direct parse
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
             pass
 
@@ -104,7 +108,9 @@ class BaseAgent(ABC):
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group())
+                parsed = json.loads(match.group())
+                if isinstance(parsed, dict):
+                    return parsed
             except json.JSONDecodeError:
                 pass
         return None

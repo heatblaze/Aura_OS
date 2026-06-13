@@ -20,6 +20,7 @@ export interface BrainNode {
   vy?: number;
   fx?: number | null;
   fy?: number | null;
+  value?: number; // optional live value
 }
 
 export interface BrainEdge {
@@ -45,16 +46,21 @@ function useForceSimulation(nodes: BrainNode[], edges: BrainEdge[], width: numbe
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    // Initialize nodes with random positions if not set
-    nodesRef.current = nodes.map((n, i) => ({
-      ...n,
-      x: n.x ?? width / 2 + (Math.random() - 0.5) * width * 0.6,
-      y: n.y ?? height / 2 + (Math.random() - 0.5) * height * 0.6,
-      vx: n.vx ?? 0,
-      vy: n.vy ?? 0,
-      fx: null,
-      fy: null,
-    }));
+    // Sync external nodes with ref, maintaining existing coordinates if available
+    const existingCoords = new Map(nodesRef.current.map(n => [n.id, { x: n.x, y: n.y, vx: n.vx, vy: n.vy }]));
+    
+    nodesRef.current = nodes.map((n) => {
+      const coords = existingCoords.get(n.id);
+      return {
+        ...n,
+        x: coords?.x ?? n.x ?? (width / 2 + (Math.random() - 0.5) * width * 0.4),
+        y: coords?.y ?? n.y ?? (height / 2 + (Math.random() - 0.5) * height * 0.4),
+        vx: coords?.vx ?? n.vx ?? 0,
+        vy: coords?.vy ?? n.vy ?? 0,
+        fx: null,
+        fy: null,
+      };
+    });
     edgesRef.current = edges;
   }, [nodes, edges, width, height]);
 
@@ -62,12 +68,12 @@ function useForceSimulation(nodes: BrainNode[], edges: BrainEdge[], width: numbe
     const ns = nodesRef.current;
     if (ns.length === 0) return;
 
-    const alpha = 0.3;
-    const repulsion = 2200;
-    const linkStrength = 0.15;
-    const linkDistance = 120;
-    const centerStrength = 0.02;
-    const damping = 0.85;
+    const alpha = 0.25;
+    const repulsion = 3200;
+    const linkStrength = 0.18;
+    const linkDistance = 145;
+    const centerStrength = 0.03;
+    const damping = 0.82;
 
     // Repulsion (each node repels all others)
     for (let i = 0; i < ns.length; i++) {
@@ -75,6 +81,7 @@ function useForceSimulation(nodes: BrainNode[], edges: BrainEdge[], width: numbe
         const dx = ns[j].x! - ns[i].x!;
         const dy = ns[j].y! - ns[i].y!;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (dist > 300) continue; // Skip far nodes to speed up
         const force = repulsion / (dist * dist);
         const fx = (dx / dist) * force * alpha;
         const fy = (dy / dist) * force * alpha;
@@ -111,11 +118,16 @@ function useForceSimulation(nodes: BrainNode[], edges: BrainEdge[], width: numbe
 
     // Apply velocity + damping + boundary constraints
     for (const n of ns) {
-      if (n.fx != null) { n.x = n.fx; n.vx = 0; continue; }
+      if (n.fx != null) {
+        n.x = n.fx;
+        n.vx = 0;
+        n.vy = 0;
+        continue;
+      }
       n.vx! *= damping;
       n.vy! *= damping;
-      n.x = Math.max(30, Math.min(width - 30, n.x! + n.vx!));
-      n.y = Math.max(30, Math.min(height - 30, n.y! + n.vy!));
+      n.x = Math.max(20, Math.min(width - 20, n.x! + n.vx!));
+      n.y = Math.max(20, Math.min(height - 20, n.y! + n.vy!));
     }
 
     setTick(t => t + 1);
@@ -135,18 +147,91 @@ export function NeuralBrainGraph({
   nodes,
   edges,
   activeNodeId = null,
-  width = 600,
-  height = 400,
+  width: propWidth,
+  height: propHeight,
   onNodeClick,
 }: NeuralBrainGraphProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dimensions, setDimensions] = useState({ width: propWidth || 600, height: propHeight || 400 });
+
+  // Handle auto-resizing if dimensions are not explicitly passed as props
+  useEffect(() => {
+    if (propWidth && propHeight) {
+      setDimensions({ width: propWidth, height: propHeight });
+      return;
+    }
+    if (!containerRef.current) return;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions({ width: width || 600, height: height || 400 });
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, [propWidth, propHeight]);
+
+  const { width, height } = dimensions;
+
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<BrainNode | null>(null);
-  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const nodesRef = useForceSimulation(nodes, edges, width, height);
   const animTimeRef = useRef(0);
 
-  // ── Canvas Render ──────────────────────────────────────────────
+  // Pan and Zoom State
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1.0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const draggedNodeRef = useRef<BrainNode | null>(null);
+
+  const hasInitializedRef = useRef(false);
+  useEffect(() => {
+    if (width > 0 && height > 0 && !hasInitializedRef.current) {
+      const defaultScale = 1.35;
+      setTransform({
+        x: (width - width * defaultScale) / 2,
+        y: (height - height * defaultScale) / 2,
+        scale: defaultScale
+      });
+      hasInitializedRef.current = true;
+    }
+  }, [width, height]);
+
+  // Traversal dynamic pulses simulating AI "learning"
+  const pulsesRef = useRef<Array<{
+    sourceId: string;
+    targetId: string;
+    progress: number;
+    speed: number;
+    color: string;
+  }>>([]);
+
+  // Helper to resolve coordinates relative to canvas zoom/pan scale transforms
+  const getTransformedCoords = useCallback((clientX: number, clientY: number, canvasElement: HTMLCanvasElement) => {
+    const rect = canvasElement.getBoundingClientRect();
+    const mouseX = clientX - rect.left;
+    const mouseY = clientY - rect.top;
+    return {
+      x: (mouseX - transform.x) / transform.scale,
+      y: (mouseY - transform.y) / transform.scale
+    };
+  }, [transform]);
+
+  // Node detection logic helper
+  const getNodeAtPoint = useCallback((x: number, y: number): BrainNode | null => {
+    const ns = nodesRef.current;
+    for (const node of [...ns].reverse()) {
+      if (node.x == null || node.y == null) continue;
+      const radius = (node.size || 10) + 6;
+      const dx = x - node.x;
+      const dy = y - node.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= radius) return node;
+    }
+    return null;
+  }, [nodesRef]);
+
+  // ── Canvas Render Loop ─────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -159,12 +244,38 @@ export function NeuralBrainGraph({
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
-    animTimeRef.current += 0.02;
+    animTimeRef.current += 0.015;
     const t = animTimeRef.current;
     const ns = nodesRef.current;
     const nodeMap = new Map(ns.map(n => [n.id, n]));
 
-    // Draw edges
+    // ── 1. Draw High-Tech Grid background ──
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.025)";
+    const gridSize = 40;
+    const startX = Math.floor((-transform.x) / (gridSize * transform.scale)) * gridSize;
+    const startY = Math.floor((-transform.y) / (gridSize * transform.scale)) * gridSize;
+    const endX = startX + (width / transform.scale) + gridSize * 2;
+    const endY = startY + (height / transform.scale) + gridSize * 2;
+    
+    for (let gx = startX; gx < endX; gx += gridSize) {
+      for (let gy = startY; gy < endY; gy += gridSize) {
+        ctx.beginPath();
+        // Screen space coordinate conversion
+        const sx = gx * transform.scale + transform.x;
+        const sy = gy * transform.scale + transform.y;
+        ctx.arc(sx, sy, 0.75, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+    // ── Apply Zoom & Pan Transform Matrix ──
+    ctx.save();
+    ctx.translate(transform.x, transform.y);
+    ctx.scale(transform.scale, transform.scale);
+
+    // ── 2. Draw Connections (Edges) ──
     for (const edge of edges) {
       const s = nodeMap.get(edge.source);
       const tg = nodeMap.get(edge.target);
@@ -174,10 +285,9 @@ export function NeuralBrainGraph({
         hoveredNode === edge.source || hoveredNode === edge.target ||
         activeNodeId === edge.source || activeNodeId === edge.target;
 
-      const alpha = isActiveEdge ? 0.5 : 0.12;
-      const lineWidth = isActiveEdge ? 1.5 : 0.5;
+      const alpha = isActiveEdge ? 0.45 : 0.14;
+      const lineWidth = isActiveEdge ? 1.5 : 0.65;
 
-      // Gradient line
       const grad = ctx.createLinearGradient(s.x, s.y, tg.x, tg.y);
       grad.addColorStop(0, `${s.color}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`);
       grad.addColorStop(1, `${tg.color}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`);
@@ -188,34 +298,59 @@ export function NeuralBrainGraph({
       ctx.strokeStyle = grad;
       ctx.lineWidth = lineWidth;
       ctx.stroke();
+    }
 
-      // Animated pulse along active edges
-      if (isActiveEdge) {
-        const pulseProgress = (t * 0.8) % 1;
-        const px = s.x + (tg.x - s.x) * pulseProgress;
-        const py = s.y + (tg.y - s.y) * pulseProgress;
-        ctx.beginPath();
-        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = s.color;
-        ctx.globalAlpha = 0.8 * (1 - pulseProgress);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+    // ── 3. Spawn & Draw real-time traversal learning pulses ──
+    if (Math.random() < 0.04 && edges.length > 0 && pulsesRef.current.length < 30) {
+      const randEdge = edges[Math.floor(Math.random() * edges.length)];
+      const srcNode = nodeMap.get(randEdge.source);
+      if (srcNode) {
+        pulsesRef.current.push({
+          sourceId: randEdge.source,
+          targetId: randEdge.target,
+          progress: 0,
+          speed: 0.005 + Math.random() * 0.01,
+          color: srcNode.color
+        });
       }
     }
 
-    // Draw nodes
+    pulsesRef.current = pulsesRef.current.filter(p => {
+      p.progress += p.speed;
+      if (p.progress >= 1.0) return false;
+
+      const s = nodeMap.get(p.sourceId);
+      const tg = nodeMap.get(p.targetId);
+      if (s && tg && s.x != null && s.y != null && tg.x != null && tg.y != null) {
+        const px = s.x + (tg.x - s.x) * p.progress;
+        const py = s.y + (tg.y - s.y) * p.progress;
+
+        // Draw glowing particle pulse
+        ctx.beginPath();
+        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 8;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+      return true;
+    });
+
+    // ── 4. Draw Nodes ──
     for (const node of ns) {
       if (node.x == null || node.y == null) continue;
 
       const isHovered = hoveredNode === node.id;
       const isActive = activeNodeId === node.id;
       const isSelected = selectedNode?.id === node.id;
-      const radius = (node.size || 10) + (isHovered || isActive ? 4 : 0);
+      const baseSize = (node.size || 12) * 1.5;
+      const radius = baseSize + (isHovered || isActive ? 4 : 0);
 
       // Outer glow
-      const glowRadius = radius * 2.5;
+      const glowRadius = radius * 2.4;
       const glow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, glowRadius);
-      const glowAlpha = isHovered || isActive ? 0.35 : 0.12;
+      const glowAlpha = isHovered || isActive ? 0.38 : 0.12;
       glow.addColorStop(0, `${node.color}${Math.round(glowAlpha * 255).toString(16).padStart(2, "0")}`);
       glow.addColorStop(1, "transparent");
       ctx.beginPath();
@@ -223,91 +358,177 @@ export function NeuralBrainGraph({
       ctx.fillStyle = glow;
       ctx.fill();
 
-      // Pulsing ring for active state
-      if (isActive || isSelected) {
-        const pulseRadius = radius + 4 + Math.sin(t * 3) * 3;
+      // Pulsing orbital ring + particle satellites for active nodes
+      if (isActive || isSelected || isHovered) {
+        // Dynamic dashed sweep ring
+        ctx.save();
+        ctx.strokeStyle = `${node.color}55`;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
         ctx.beginPath();
-        ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = `${node.color}60`;
-        ctx.lineWidth = 1.5;
+        ctx.arc(node.x, node.y, radius + 10, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.restore();
+
+        // 3 orbiters revolving around the node core
+        for (let o = 0; o < 3; o++) {
+          const angle = t * 2.4 + (o * Math.PI * 2) / 3;
+          const ox = node.x + Math.cos(angle) * (radius + 10);
+          const oy = node.y + Math.sin(angle) * (radius + 10);
+          ctx.beginPath();
+          ctx.arc(ox, oy, 1.5, 0, Math.PI * 2);
+          ctx.fillStyle = "#ffffff";
+          ctx.fill();
+        }
       }
 
-      // Node fill
+      // Glassy Marble Spherical Gradient core fill
       const fill = ctx.createRadialGradient(
-        node.x - radius * 0.3, node.y - radius * 0.3, 0,
+        node.x - radius * 0.25, node.y - radius * 0.25, 0,
         node.x, node.y, radius
       );
-      fill.addColorStop(0, isHovered || isActive ? node.color : `${node.color}CC`);
-      fill.addColorStop(1, `${node.color}66`);
+      fill.addColorStop(0, "#ffffff");
+      fill.addColorStop(0.3, node.color);
+      fill.addColorStop(1, `${node.color}55`);
 
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = fill;
       ctx.fill();
 
-      // Node border
+      // Border outline
       ctx.beginPath();
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = isHovered || isActive ? node.color : `${node.color}80`;
-      ctx.lineWidth = isHovered || isActive ? 2 : 1;
+      ctx.strokeStyle = isHovered || isActive ? "#ffffff" : `${node.color}99`;
+      ctx.lineWidth = isHovered || isActive ? 1.5 : 1;
       ctx.stroke();
 
-      // Label
-      const labelAlpha = isHovered || isActive ? 1 : 0.65;
-      ctx.globalAlpha = labelAlpha;
-      ctx.font = `${isHovered || isActive ? 600 : 500} ${isHovered ? 11 : 10}px Inter, sans-serif`;
+      // Sharp central glossy dot
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+
+      // Node label text styling
+      const textAlpha = isHovered || isActive ? 1.0 : 0.65;
+      ctx.save();
+      ctx.globalAlpha = textAlpha;
+      ctx.font = `${isHovered || isActive ? "600" : "500"} ${isHovered ? "13" : "11.5"}px 'Inter', sans-serif`;
       ctx.fillStyle = "white";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(node.label, node.x, node.y + radius + 12);
-      ctx.globalAlpha = 1;
+      ctx.fillText(node.label, node.x, node.y + radius + 14);
+      ctx.restore();
     }
+
+    ctx.restore(); // Restore zoom/pan matrix for correct layout operations
   });
 
-  // ── Hit Detection ──────────────────────────────────────────────
-  const getNodeAtPoint = useCallback((x: number, y: number): BrainNode | null => {
-    const ns = nodesRef.current;
-    for (const node of [...ns].reverse()) {
-      if (node.x == null || node.y == null) continue;
-      const radius = (node.size || 10) + 4;
-      const dx = x - node.x;
-      const dy = y - node.y;
-      if (Math.sqrt(dx * dx + dy * dy) <= radius) return node;
+  // ── Panning & Zooming Event Handlers ──
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { x, y } = getTransformedCoords(e.clientX, e.clientY, canvas);
+    const clickedNode = getNodeAtPoint(x, y);
+
+    if (clickedNode) {
+      draggedNodeRef.current = clickedNode;
+      clickedNode.fx = clickedNode.x;
+      clickedNode.fy = clickedNode.y;
+    } else {
+      setIsPanning(true);
+      panStartRef.current = {
+        x: e.clientX - transform.x,
+        y: e.clientY - transform.y
+      };
     }
-    return null;
-  }, [nodesRef]);
+  }, [getTransformedCoords, getNodeAtPoint, transform]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { x, y } = getTransformedCoords(e.clientX, e.clientY, canvas);
+
+    if (draggedNodeRef.current) {
+      const node = draggedNodeRef.current;
+      node.fx = Math.max(10, Math.min(width - 10, x));
+      node.fy = Math.max(10, Math.min(height - 10, y));
+      node.x = node.fx;
+      node.y = node.fy;
+    } else if (isPanning) {
+      setTransform(prev => ({
+        ...prev,
+        x: e.clientX - panStartRef.current.x,
+        y: e.clientY - panStartRef.current.y
+      }));
+    } else {
+      const hoverNode = getNodeAtPoint(x, y);
+      setHoveredNode(hoverNode?.id || null);
+      canvas.style.cursor = hoverNode ? "pointer" : isPanning ? "grabbing" : "default";
+    }
+  }, [getTransformedCoords, getNodeAtPoint, isPanning, transform, width, height]);
+
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (draggedNodeRef.current) {
+      draggedNodeRef.current.fx = null;
+      draggedNodeRef.current.fy = null;
+      draggedNodeRef.current = null;
+    }
+    setIsPanning(false);
+  }, []);
+
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const zoomFactor = 1.05;
+    const nextScale = e.deltaY < 0 ? transform.scale * zoomFactor : transform.scale / zoomFactor;
+    const cappedScale = Math.max(0.4, Math.min(3.5, nextScale));
+    
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setMousePos({ x, y });
-    const node = getNodeAtPoint(x, y);
-    setHoveredNode(node?.id || null);
-    e.currentTarget.style.cursor = node ? "pointer" : "default";
-  }, [getNodeAtPoint]);
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    const dx = mouseX - transform.x;
+    const dy = mouseY - transform.y;
+    
+    setTransform({
+      x: mouseX - dx * (cappedScale / transform.scale),
+      y: mouseY - dy * (cappedScale / transform.scale),
+      scale: cappedScale
+    });
+  }, [transform]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const node = getNodeAtPoint(x, y);
-    if (node) {
-      setSelectedNode(prev => prev?.id === node.id ? null : node);
-      onNodeClick?.(node);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const { x, y } = getTransformedCoords(e.clientX, e.clientY, canvas);
+    const clickedNode = getNodeAtPoint(x, y);
+    
+    if (clickedNode) {
+      setSelectedNode(prev => prev?.id === clickedNode.id ? null : clickedNode);
+      onNodeClick?.(clickedNode);
     } else {
       setSelectedNode(null);
     }
-  }, [getNodeAtPoint, onNodeClick]);
+  }, [getTransformedCoords, getNodeAtPoint, onNodeClick]);
 
   return (
-    <div style={{ position: "relative", width, height }}>
+    <div ref={containerRef} style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden" }}>
       <canvas
         ref={canvasRef}
-        style={{ width, height, display: "block", borderRadius: 12 }}
+        style={{ width: "100%", height: "100%", display: "block", borderRadius: 12 }}
+        onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoveredNode(null)}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => {
+          setHoveredNode(null);
+          if (draggedNodeRef.current) {
+            draggedNodeRef.current.fx = null;
+            draggedNodeRef.current.fy = null;
+            draggedNodeRef.current = null;
+          }
+          setIsPanning(false);
+        }}
+        onWheel={handleWheel}
         onClick={handleClick}
       />
 
@@ -316,8 +537,11 @@ export function NeuralBrainGraph({
         {hoveredNode && !selectedNode && (() => {
           const node = nodesRef.current.find(n => n.id === hoveredNode);
           if (!node || node.x == null || node.y == null) return null;
-          const tipX = Math.min(node.x + 20, width - 180);
-          const tipY = Math.min(node.y - 10, height - 100);
+          
+          // Project tooltips relative to translated/scaled layout viewport coordinates
+          const tipX = Math.max(10, Math.min(node.x * transform.scale + transform.x + 20, width - 190));
+          const tipY = Math.max(10, Math.min(node.y * transform.scale + transform.y - 10, height - 120));
+          
           return (
             <motion.div
               key={hoveredNode}
@@ -329,7 +553,7 @@ export function NeuralBrainGraph({
                 position: "absolute", left: tipX, top: tipY,
                 background: "rgba(6,10,22,0.95)", border: `1px solid ${node.color}40`,
                 borderRadius: 10, padding: "10px 14px", pointerEvents: "none",
-                backdropFilter: "blur(12px)", maxWidth: 180, zIndex: 10,
+                backdropFilter: "blur(12px)", width: 170, zIndex: 10,
               }}
             >
               <div style={{ fontSize: 11, fontWeight: 700, color: node.color, marginBottom: 4, letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -339,7 +563,7 @@ export function NeuralBrainGraph({
                 {node.line_count} lines · {node.filename}
               </div>
               {node.excerpt && (
-                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", lineHeight: 1.4 }}>
+                <div style={{ fontSize: 9.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.4 }}>
                   {node.excerpt.slice(0, 80)}...
                 </div>
               )}
@@ -393,19 +617,39 @@ export function NeuralBrainGraph({
 }
 
 // ── Static fallback graph (for when backend is offline) ─────────
-export function BrainGraphFallback({ width = 600, height = 280 }: { width?: number; height?: number }) {
+export function BrainGraphFallback() {
   const fallbackNodes: BrainNode[] = [
-    { id: "memory",      label: "Memory",      filename: "memory.md",      size: 16, color: "#00d4ff", modified_at: "", line_count: 12, excerpt: "Ongoing facts and learnings..." },
-    { id: "tasks",       label: "Tasks",       filename: "tasks.md",       size: 14, color: "#10b981", modified_at: "", line_count: 8,  excerpt: "Active and completed tasks..." },
-    { id: "personality", label: "Personality", filename: "personality.md", size: 12, color: "#8b5cf6", modified_at: "", line_count: 10, excerpt: "User preferences and style..." },
-    { id: "context",     label: "Context",     filename: "context.md",     size: 18, color: "#f59e0b", modified_at: "", line_count: 20, excerpt: "Current project context..." },
-  ];
-  const fallbackEdges: BrainEdge[] = [
-    { source: "context", target: "tasks",       type: "mention" },
-    { source: "context", target: "memory",      type: "mention" },
-    { source: "memory",  target: "personality", type: "mention" },
-    { source: "tasks",   target: "memory",      type: "wiki_link" },
+    { id: "memory",             label: "Memory System",       filename: "memory.md",             size: 16, color: "#00d4ff", modified_at: new Date().toISOString(), line_count: 42, excerpt: "Central repository of active learnings, factual extractions, and operator notes..." },
+    { id: "tasks",              label: "Task Director",       filename: "tasks.md",              size: 14, color: "#10b981", modified_at: new Date().toISOString(), line_count: 24, excerpt: "Persistent tracking of active system directives, sub-agent workloads, and user reminders..." },
+    { id: "personality",        label: "Core Personality",    filename: "personality.md",        size: 12, color: "#8b5cf6", modified_at: new Date().toISOString(), line_count: 18, excerpt: "Custom communication profiles, interactive behaviors, and voice engine configuration..." },
+    { id: "context",            label: "Active Context",      filename: "context.md",            size: 18, color: "#f59e0b", modified_at: new Date().toISOString(), line_count: 65, excerpt: "Project stack details, live socket port addresses, and active workspace references..." },
+    { id: "registry",           label: "Tool Registry",       filename: "registry.md",           size: 11, color: "#00d4ff", modified_at: new Date().toISOString(), line_count: 15, excerpt: "Registered local tools, authorization tokens, calendar mappings, and credentials..." },
+    { id: "proactive",          label: "Proactive Loop",      filename: "proactive.md",          size: 13, color: "#10b981", modified_at: new Date().toISOString(), line_count: 31, excerpt: "Scheduled cron events, background triggers, and user message context scanners..." },
+    { id: "sessions",           label: "Session Manager",     filename: "sessions.md",           size: 15, color: "#3b82f6", modified_at: new Date().toISOString(), line_count: 52, excerpt: "Recent active channels, workspace directories, and past operator chat transcripts..." },
+    { id: "calibration",        label: "Health Calibrator",   filename: "calibration.md",        size: 10, color: "#8b5cf6", modified_at: new Date().toISOString(), line_count: 12, excerpt: "Ollama connection latency metrics, active processes, and model memory load logs..." },
+    { id: "skills",             label: "Skill Knowledge",     filename: "skills.md",             size: 13, color: "#f59e0b", modified_at: new Date().toISOString(), line_count: 28, excerpt: "Trained system commands, prompt bypass rules, and learned user command frequencies..." },
+    { id: "learned_experience", label: "Learned Experience",  filename: "learned_experience.md", size: 15, color: "#8b5cf6", modified_at: new Date().toISOString(), line_count: 22, excerpt: "Summary of AURA's recent state, wins (successes), and failures (learnings)..." }
   ];
 
-  return <NeuralBrainGraph nodes={fallbackNodes} edges={fallbackEdges} width={width} height={height} />;
+  const fallbackEdges: BrainEdge[] = [
+    { source: "context",            target: "tasks",              type: "mention" },
+    { source: "context",            target: "memory",             type: "mention" },
+    { source: "memory",             target: "personality",        type: "mention" },
+    { source: "tasks",              target: "memory",             type: "wiki_link" },
+    { source: "registry",           target: "context",            type: "wiki_link" },
+    { source: "proactive",          target: "registry",           type: "mention" },
+    { source: "proactive",          target: "memory",             type: "mention" },
+    { source: "proactive",          target: "learned_experience", type: "wiki_link" },
+    { source: "sessions",           target: "context",            type: "mention" },
+    { source: "sessions",           target: "memory",             type: "wiki_link" },
+    { source: "calibration",        target: "proactive",          type: "mention" },
+    { source: "skills",             target: "personality",        type: "mention" },
+    { source: "skills",             target: "registry",           type: "wiki_link" },
+    { source: "skills",             target: "learned_experience", type: "wiki_link" },
+    { source: "learned_experience", target: "context",            type: "wiki_link" },
+    { source: "learned_experience", target: "registry",           type: "wiki_link" },
+    { source: "learned_experience", target: "calibration",        type: "wiki_link" }
+  ];
+
+  return <NeuralBrainGraph nodes={fallbackNodes} edges={fallbackEdges} />;
 }

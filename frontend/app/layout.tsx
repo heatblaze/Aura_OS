@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "./components/Sidebar";
+import { PageTransition } from "./components/PageTransition";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -25,7 +26,9 @@ export default function RootLayout({
         <div className="app-container">
           <Sidebar />
           <main className="panel-main">
-            {children}
+            <PageTransition>
+              {children}
+            </PageTransition>
           </main>
         </div>
       </body>

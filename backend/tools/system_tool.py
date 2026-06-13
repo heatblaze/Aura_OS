@@ -34,43 +34,52 @@ class LocalSystemTool(BaseTool):
         try:
             logger.info("Executing local command", command=command)
             
-            # Using asyncio.create_subprocess_shell to run the command asynchronously
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=os.getcwd()  # Usually the project root
-            )
+            # Use synchronous subprocess.run inside a background thread via asyncio.to_thread.
+            # This completely bypasses Windows asyncio NotImplementedError/event-loop policy limits
+            # under runners like Uvicorn, while keeping command execution non-blocking.
+            def run_command_sync():
+                import subprocess
+                try:
+                    res = subprocess.run(
+                        command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        errors="replace",
+                        cwd=os.getcwd(),
+                        timeout=timeout
+                    )
+                    return res.returncode, res.stdout, res.stderr, False
+                except subprocess.TimeoutExpired:
+                    return -1, "", "", True
 
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
-                
-                stdout_str = stdout.decode("utf-8", errors="replace").strip()
-                stderr_str = stderr.decode("utf-8", errors="replace").strip()
-                
-                # Check exit code
-                if process.returncode == 0:
-                    return ToolResult(
-                        success=True,
-                        data={
-                            "command": command,
-                            "stdout": stdout_str,
-                            "stderr": stderr_str,
-                            "exit_code": process.returncode
-                        },
-                        metadata={"tool": self.name}
-                    )
-                else:
-                    return ToolResult(
-                        success=False,
-                        error=f"Command failed with exit code {process.returncode}:\n{stderr_str or stdout_str}",
-                        data={"stdout": stdout_str, "stderr": stderr_str}
-                    )
-                    
-            except asyncio.TimeoutError:
-                process.kill()
+            returncode, stdout_str, stderr_str, timed_out = await asyncio.to_thread(run_command_sync)
+
+            if timed_out:
                 return ToolResult(success=False, error=f"Command timed out after {timeout} seconds.")
 
+            # Check exit code
+            if returncode == 0:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "command": command,
+                        "stdout": stdout_str.strip(),
+                        "stderr": stderr_str.strip(),
+                        "exit_code": returncode
+                    },
+                    metadata={"tool": self.name}
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"Command failed with exit code {returncode}:\n{stderr_str.strip() or stdout_str.strip()}",
+                    data={"stdout": stdout_str.strip(), "stderr": stderr_str.strip()}
+                )
+
         except Exception as e:
-            logger.error("LocalSystemTool Error", error=str(e))
+            import traceback
+            traceback_str = traceback.format_exc()
+            logger.error("LocalSystemTool Error", error=str(e), traceback=traceback_str)
             return ToolResult(success=False, error=f"Execution error: {str(e)}")

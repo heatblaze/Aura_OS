@@ -24,9 +24,18 @@ class WebSearchTool(BaseTool):
         if not query:
             return ToolResult(success=False, error="No search query provided")
 
-        # Try SerpAPI first if key available
+        # Try API Search first if key available
         if settings.SERPAPI_KEY:
-            return await self._serpapi_search(query, num_results)
+            api_key = settings.SERPAPI_KEY.strip().lstrip('#').strip()
+            # Detect if it's a SearchApi.io key (typically 24 characters) or SerpApi.com key (typically 64 characters)
+            if len(api_key) == 24:
+                res = await self._searchapi_io_search(query, num_results, api_key)
+            else:
+                res = await self._serpapi_search(query, num_results, api_key)
+
+            if res.success and isinstance(res.data, dict) and res.data.get("results"):
+                return res
+            logger.warning("Configured Search API failed; falling back to DuckDuckGo", query=query)
 
         # Free fallback: DuckDuckGo
         return await self._ddg_search(query, num_results)
@@ -50,13 +59,13 @@ class WebSearchTool(BaseTool):
         except Exception as e:
             return ToolResult(success=False, error=f"DuckDuckGo search failed: {e}")
 
-    async def _serpapi_search(self, query: str, num_results: int) -> ToolResult:
+    async def _serpapi_search(self, query: str, num_results: int, api_key: str) -> ToolResult:
         try:
             import httpx
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://serpapi.com/search",
-                    params={"q": query, "api_key": settings.SERPAPI_KEY, "num": num_results},
+                    params={"q": query, "api_key": api_key, "num": num_results},
                     timeout=15,
                 )
                 data = response.json()
@@ -71,6 +80,28 @@ class WebSearchTool(BaseTool):
                 )
         except Exception as e:
             return ToolResult(success=False, error=f"SerpAPI search failed: {e}")
+
+    async def _searchapi_io_search(self, query: str, num_results: int, api_key: str) -> ToolResult:
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://www.searchapi.io/api/v1/search",
+                    params={"q": query, "api_key": api_key, "engine": "google", "num": num_results},
+                    timeout=15,
+                )
+                data = response.json()
+                results = [
+                    {"title": r.get("title"), "url": r.get("link"), "snippet": r.get("snippet")}
+                    for r in data.get("organic_results", [])[:num_results]
+                ]
+                return ToolResult(
+                    success=True,
+                    data={"query": query, "results": results, "source": "searchapi.io"},
+                    metadata={"tool": self.name},
+                )
+        except Exception as e:
+            return ToolResult(success=False, error=f"SearchApi.io search failed: {e}")
 
 
 class GoogleCalendarTool(BaseTool):
@@ -213,18 +244,103 @@ class TwilioTool(BaseTool):
 
     async def _run(self, params: dict) -> ToolResult:
         action = params.get("action", "sms")
+        to_number = params.get("to") or params.get("phone_number") or params.get("recipient")
+        if not to_number:
+            return ToolResult(success=False, error="Recipient phone number ('to' or 'phone_number') is required")
+
         if action == "sms":
             if self.is_configured():
                 from twilio.rest import Client
                 client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
                 msg = client.messages.create(
-                    body=params.get("message", ""),
+                    body=params.get("message") or params.get("body") or "",
                     from_=settings.TWILIO_PHONE_NUMBER,
-                    to=params.get("to", ""),
+                    to=to_number,
                 )
                 return ToolResult(success=True, data={"sid": msg.sid, "status": msg.status})
             return ToolResult(success=False, error="Twilio credentials not configured")
+        elif action == "call":
+            if self.is_configured():
+                from twilio.rest import Client
+                client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                twiml = params.get("twiml") or params.get("message") or params.get("body") or "<Response><Say>Hello, this is a call from AURA.</Say></Response>"
+                if not twiml.strip().startswith("<"):
+                    twiml = f"<Response><Say>{twiml}</Say></Response>"
+                call = client.calls.create(
+                    twiml=twiml,
+                    from_=settings.TWILIO_PHONE_NUMBER,
+                    to=to_number,
+                )
+                return ToolResult(success=True, data={"sid": call.sid, "status": call.status})
+            return ToolResult(success=False, error="Twilio credentials not configured")
         return ToolResult(success=False, error=f"Unknown action: {action}")
+
+
+class TwilioSmsTool(BaseTool):
+    name = "twilio_sms"
+    description = "Send SMS messages via Twilio."
+    requires_auth = True
+
+    def is_configured(self) -> bool:
+        return bool(settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN)
+
+    async def _run(self, params: dict) -> ToolResult:
+        if not self.is_configured():
+            return ToolResult(success=False, error="Twilio credentials not configured")
+
+        to_number = params.get("to") or params.get("phone_number") or params.get("recipient")
+        if not to_number:
+            return ToolResult(success=False, error="Recipient phone number ('to' or 'phone_number') is required")
+
+        message_body = params.get("message") or params.get("body") or ""
+
+        try:
+            from twilio.rest import Client
+            client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            msg = client.messages.create(
+                body=message_body,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=to_number,
+            )
+            return ToolResult(success=True, data={"sid": msg.sid, "status": msg.status})
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+
+class TwilioCallTool(BaseTool):
+    name = "twilio_call"
+    description = "Make phone calls via Twilio."
+    requires_auth = True
+
+    def is_configured(self) -> bool:
+        return bool(settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN)
+
+    async def _run(self, params: dict) -> ToolResult:
+        if not self.is_configured():
+            return ToolResult(success=False, error="Twilio credentials not configured")
+
+        to_number = params.get("to") or params.get("phone_number") or params.get("recipient")
+        if not to_number:
+            return ToolResult(success=False, error="Recipient phone number ('to' or 'phone_number') is required")
+
+        twiml = params.get("twiml") or params.get("message") or params.get("body") or "<Response><Say>Hello, this is a call from AURA OS.</Say></Response>"
+
+        # If it's a plain message (not XML), wrap it in Say TwiML
+        if not twiml.strip().startswith("<"):
+            twiml = f"<Response><Say>{twiml}</Say></Response>"
+
+        try:
+            from twilio.rest import Client
+            client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+            call = client.calls.create(
+                twiml=twiml,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=to_number,
+            )
+            return ToolResult(success=True, data={"sid": call.sid, "status": call.status})
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
 
 
 class BrowserTool(BaseTool):
@@ -265,3 +381,105 @@ class BrowserTool(BaseTool):
                 return ToolResult(success=False, error=f"Unknown action: {action}")
         except Exception as e:
             return ToolResult(success=False, error=f"Browser error: {e}")
+
+
+class ClockTool(BaseTool):
+    name = "system_clock"
+    description = (
+        "Get the current date and time for a specific location or time zone. "
+        "Accepts a 'location' parameter (e.g. 'New York', 'London', 'Tokyo', 'UTC', or 'Asia/Kolkata')."
+    )
+    requires_auth = False
+
+    async def _run(self, params: dict) -> ToolResult:
+        location = params.get("location", "").strip()
+        if not location:
+            return ToolResult(success=False, error="No location provided.")
+
+        import zoneinfo
+        from datetime import datetime
+
+        try:
+            tz_name = self.resolve_timezone(location)
+            tz = zoneinfo.ZoneInfo(tz_name)
+            now = datetime.now(tz)
+
+            # Format current_time to be human-readable and natural (e.g. "Tuesday, June 09, 2026, 05:29:32 PM (IST, UTC+05:30)")
+            current_time = now.strftime("%A, %B %d, %Y, %I:%M:%S %p (%Z, UTC%z)")
+            tz_offset = now.strftime("%z")
+            if len(tz_offset) == 5:
+                current_time = current_time.replace(tz_offset, f"{tz_offset[:3]}:{tz_offset[3:]}")
+
+            return ToolResult(
+                success=True,
+                data={
+                    "location": location,
+                    "resolved_timezone": tz_name,
+                    "current_time": current_time,
+                    "iso_timestamp": now.isoformat()
+                },
+                metadata={"tool": self.name}
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=f"Failed to get clock time: {str(e)}")
+
+    def resolve_timezone(self, location: str) -> str:
+        loc_clean = location.strip().lower().replace(" ", "_")
+
+        # Common abbreviations & aliases
+        aliases = {
+            "nyc": "America/New_York",
+            "new york": "America/New_York",
+            "new york city": "America/New_York",
+            "la": "America/Los_Angeles",
+            "ist": "Asia/Kolkata",
+            "india": "Asia/Kolkata",
+            "utc": "UTC",
+            "gmt": "UTC",
+            "bst": "Europe/London",
+            "pt": "America/Los_Angeles",
+            "et": "America/New_York",
+            "ct": "America/Chicago",
+            "mt": "America/Denver",
+            "pst": "America/Los_Angeles",
+            "est": "America/New_York",
+            "cst": "America/Chicago",
+            "mst": "America/Denver",
+            "cet": "Europe/Paris",
+            "eet": "Europe/Kiev",
+            "wet": "Europe/London",
+        }
+
+        # Check key with clean underscores
+        if loc_clean in aliases:
+            return aliases[loc_clean]
+        
+        # Check raw input with spaces (e.g. "new york" instead of "new_york" in aliases just in case)
+        raw_clean = location.strip().lower()
+        if raw_clean in aliases:
+            return aliases[raw_clean]
+
+        import zoneinfo
+        try:
+            zones = zoneinfo.available_timezones()
+        except Exception:
+            zones = set()
+
+        # 1. Exact match (case-insensitive)
+        for zone in zones:
+            if zone.lower() == loc_clean:
+                return zone
+
+        # 2. Match city suffix, e.g. "new_york" matches "America/New_York"
+        for zone in zones:
+            parts = zone.lower().split("/")
+            if parts[-1] == loc_clean:
+                return zone
+
+        # 3. Fuzzy match: target is a substring of the timezone name
+        for zone in zones:
+            if loc_clean in zone.lower():
+                return zone
+
+        # Fallback to local timezone or raise error
+        raise ValueError(f"Could not resolve timezone for location '{location}'")

@@ -33,6 +33,7 @@ export type EventType =
   | "session_cleared"
   | "disconnected"
   | "final_response"
+  | "switch_channel"
   | "error";
 
 export interface JarvisEvent {
@@ -129,6 +130,23 @@ export const AGENT_ICONS: Record<string, string> = {
   critic: "CRT",
   intent: "INT",
 };
+
+// ── Visual Data Panel ─────────────────────────────────────────
+export interface VizData {
+  type: "chart" | "line" | "metrics" | "table" | "code" | "mixed";
+  agent: string;
+  title: string;
+  description?: string;
+  // Bar / line chart data
+  rows?: { label: string; value: number }[];
+  // Metric cards
+  metrics?: { label: string; value: string | number; unit?: string }[];
+  // Table data
+  headers?: string[];
+  tableRows?: string[][];
+  // Code block
+  code?: string;
+}
 
 export const EVENT_LABELS: Partial<Record<EventType, string>> = {
   pipeline_start: "Pipeline activated",

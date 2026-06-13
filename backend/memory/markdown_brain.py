@@ -66,6 +66,54 @@ def ensure_brain_dir():
             "- Implement Markdown Brain memory system\n"
             "- Build Neural Brain Graph visualization\n"
         ),
+        "registry.md": (
+            "# Tool Registry Manifest\n\n"
+            "Configuration and credentials mapping for registered agent capabilities.\n\n"
+            "## Tools\n"
+            "- WebSearchTool: Configured and active [[registry]]\n"
+            "- BrowserTool: Local Playwright sandbox active\n"
+            "- LocalSystemTool: Command line execution enabled\n"
+        ),
+        "proactive.md": (
+            "# Proactive Background Initiatives\n\n"
+            "Scheduler logs, trigger constraints, and contextual scanners.\n\n"
+            "## Triggers\n"
+            "- MorningBriefTrigger: Fires at 09:00 UTC\n"
+            "- InboxScanTrigger: Scans mail queues dynamically [[registry]]\n"
+            "- MemoryConsolidationTrigger: Active on system idle [[memory]]\n"
+            "- KRONOSCompilerTrigger: Compiles learned experience nodes [[learned_experience]]\n"
+        ),
+        "sessions.md": (
+            "# Chat Session History\n\n"
+            "Index of recent conversations and channel summaries.\n\n"
+            "## Active Channels\n"
+            "- #general-chat: Primary AI operational feed [[context]]\n"
+            "- #business-operations: Growth and outreach [[memory]]\n"
+        ),
+        "calibration.md": (
+            "# Calibration Telemetry & Performance\n\n"
+            "Inference logs, queue congestion levels, and model calibration states.\n\n"
+            "## Diagnostic State\n"
+            "- Ollama Link: Connected and stable\n"
+            "- Scheduler State: Operational [[proactive]]\n"
+        ),
+        "skills.md": (
+            "# Learned Agent Skills\n\n"
+            "Learned procedures, query filters, and custom routine templates.\n\n"
+            "## Routines\n"
+            "- Layout adjustments for Next.js layout engine [[personality]]\n"
+            "- File scanner routines for code directories [[registry]]\n"
+            "- Performance indexing and success compilation [[learned_experience]]\n"
+        ),
+        "learned_experience.md": (
+            "# KRONOS Learned Experience\n\n"
+            "Summary of AURA's operational wins and learnings from task executions.\n\n"
+            "## Successes (Wins)\n"
+            "- Successfully completed layout optimizations in [[context]].\n"
+            "- Successfully consolidated tools interface inside [[registry]].\n\n"
+            "## Failures (Learnings)\n"
+            "- Connection timeout with external API calibration [[calibration]].\n"
+        ),
     }
 
     for filename, content in defaults.items():

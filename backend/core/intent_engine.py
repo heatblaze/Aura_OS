@@ -2,10 +2,12 @@
 Intent Engine — extracts structured intent from natural language using Ollama.
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
+# pyrefly: ignore [missing-import]
 import httpx
+# pyrefly: ignore [missing-import]
 import structlog
 
 from backend.config.settings import settings
@@ -42,6 +44,7 @@ Intent names (use these exactly):
 - create_note: Create a note
 - manage_tasks: Task/to-do management
 - system_control: Control system settings
+- system_command: Open local folders, files, file explorer, notepad, or run desktop shell commands
 - conversation: General chat or questions
 - unknown: Cannot determine intent
 
@@ -60,6 +63,35 @@ class IntentEngine:
         Extract structured intent from a natural language message.
         Returns an intent dict with entities, priority, and category.
         """
+        # Fast rule-based bypass for simple conversational phrases to reduce latency
+        msg_clean = user_message.strip().lower().rstrip("?").rstrip("!").rstrip(".")
+
+        # Capture the Arise protocol invocation cleanly
+        if "arise" in msg_clean and ("initiate" in msg_clean or "protocol" in msg_clean or "arise" == msg_clean):
+            logger.info("ARISE Protocol fast-path bypass triggered", message=user_message)
+            intent = self._fallback_intent(user_message)
+            intent["intent"] = "arise_protocol"
+            intent["confidence"] = 1.0
+            intent["raw_message"] = user_message
+            intent["timestamp"] = datetime.now(timezone.utc).isoformat()
+            return intent
+        conversational_phrases = {
+            "hi", "hello", "hey", "hola", "can you hear me", "test", "testing",
+            "how are you", "who are you", "what is your name", "yes", "no", "ok",
+            "okay", "sure", "cancel", "stop", "good morning", "good afternoon",
+            "good evening", "thank you", "thanks", "bye", "goodbye", "help"
+        }
+        action_keywords = {"open", "run", "start", "launch", "execute", "close", "kill", "system", "cmd", "powershell"}
+        is_action = any(kw in msg_clean.split() for kw in action_keywords)
+        if msg_clean in conversational_phrases or (len(msg_clean.split()) <= 2 and not is_action):
+            logger.info("Intent extraction fast-path bypass triggered", message=user_message)
+            intent = self._fallback_intent(user_message)
+            intent["intent"] = "conversation"
+            intent["confidence"] = 1.0
+            intent["raw_message"] = user_message
+            intent["timestamp"] = datetime.now(timezone.utc).isoformat()
+            return intent
+
         history_str = ""
         if conversation_history:
             history_str = "\nRecent conversation context:\n" + "\n".join(
@@ -89,7 +121,7 @@ Extract the intent. Return ONLY the JSON object, no other text."""
             intent = self._fallback_intent(user_message)
 
         intent["raw_message"] = user_message
-        intent["timestamp"] = datetime.utcnow().isoformat()
+        intent["timestamp"] = datetime.now(timezone.utc).isoformat()
         return intent
 
     def _parse_intent(self, text: str) -> dict:
@@ -97,39 +129,56 @@ Extract the intent. Return ONLY the JSON object, no other text."""
         import re
         text = re.sub(r"```(?:json)?\n?", "", text).strip().rstrip("`").strip()
         try:
-            return json.loads(text)
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
         except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", text, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group())
-                except json.JSONDecodeError:
-                    pass
+            pass
+
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group())
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
         return self._fallback_intent(text)
 
     def _fallback_intent(self, message: str) -> dict:
         """Rule-based fallback when LLM fails."""
         message_lower = message.lower()
-        intent_map = {
-            ("schedule", "meeting", "appointment", "calendar", "book"): "schedule_event",
-            ("email", "send", "mail", "compose"): "send_email",
-            ("search", "find", "look up", "google", "what is"): "search_web",
-            ("call", "phone", "ring", "dial"): "make_call",
-            ("remind", "reminder", "alert"): "set_reminder",
-            ("browse", "open", "website", "url"): "browse_website",
-        }
+        intent_map = [
+            (("explorer", "notepad", "notes", "terminal", "cmd", "command", "system", "app", "application", "calc", "calculator", "file", "folder"), "system_command"),
+            (("schedule", "meeting", "appointment", "calendar", "book"), "schedule_event"),
+            (("email", "send", "mail", "compose"), "send_email"),
+            (("search", "find", "look up", "google", "what is"), "search_web"),
+            (("call", "phone", "ring", "dial"), "make_call"),
+            (("remind", "reminder", "alert"), "set_reminder"),
+            (("browse", "open", "website", "url"), "browse_website"),
+        ]
         detected_intent = "conversation"
-        for keywords, intent_name in intent_map.items():
+        for keywords, intent_name in intent_map:
             if any(kw in message_lower for kw in keywords):
                 detected_intent = intent_name
                 break
+        
+        category = "conversation"
+        requires_action = False
+        if detected_intent == "system_command":
+            category = "system"
+            requires_action = True
+        elif detected_intent != "conversation":
+            category = "productivity"
+            requires_action = True
+
         return {
             "intent": detected_intent,
             "confidence": 0.5,
             "entities": {},
             "priority": "medium",
-            "category": "conversation",
-            "requires_action": False,
+            "category": category,
+            "requires_action": requires_action,
             "sentiment": "neutral",
             "language": "en",
         }

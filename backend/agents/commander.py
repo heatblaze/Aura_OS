@@ -25,7 +25,11 @@ Always respond with valid JSON in this exact format:
   "context_notes": "any relevant context from conversation history"
 }
 
-Available tools: google_calendar, gmail, web_search, browser_automation, twilio_call, twilio_sms
+Available tools: google_calendar, gmail, web_search, browser_automation, twilio_call, twilio_sms, local_system (for launching desktop tasks, notepad, file explorer, or running shell commands), system_clock (for checking current date/time for specific cities or time zones)
+
+For any system tasks, opening file explorer, launching local tools/applications (like notepad, notes, calculator), or running scripts/commands, you MUST use the strategy 'tool_execution' and include 'local_system' in 'tools_needed'. Do NOT handle these via direct_response.
+- For simple queries about the current LOCAL system date/time (e.g. "what is the time now", "what's today's date", "time now"), you should use the strategy 'direct_response' and set 'requires_tools' to false. The final response generator already has the current system date and time injected.
+- For queries asking for the current time or date in OTHER cities, regions, or time zones (e.g. "current time in New York", "time in London", "time in Tokyo", "what's the time in NYC"), you MUST use the strategy 'tool_execution', set 'requires_tools' to true, and specify 'system_clock' in 'tools_needed'. Do NOT handle these via direct_response, as timezone math calculations must be performed programmatically.
 """
 
 

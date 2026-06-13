@@ -27,6 +27,11 @@ const FILE_COLORS: Record<string, string> = {
   tasks:       "#10b981",
   personality: "#8b5cf6",
   context:     "#f59e0b",
+  registry:    "#00d4ff",
+  proactive:   "#10b981",
+  sessions:    "#3b82f6",
+  calibration: "#8b5cf6",
+  skills:      "#f59e0b",
 };
 
 export default function MemoryPage() {
@@ -91,45 +96,44 @@ export default function MemoryPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Header */}
-      <header style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", padding: "18px 28px 14px", flexShrink: 0 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "white", letterSpacing: "-0.02em", marginBottom: 2 }}>Neuralink Brain</h1>
-          <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Live visualization of AURA&apos;s persistent memory network.</p>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8, padding: "6px 14px",
-            background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10,
-          }}>
-            <Search style={{ width: 14, height: 14, color: "var(--text-muted)" }} />
-            <input
-              placeholder="Search brain..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 12, width: 140, fontFamily: "'Inter', sans-serif" }}
-            />
+      {/* Scrollable Content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px" }} className="scrollbar-hide">
+        {/* Title & Controls (Navbar Dissolved Inline) */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: "white", letterSpacing: "-0.02em", marginBottom: 2 }}>Neuralink Brain</h1>
+            <p style={{ fontSize: 12, color: "var(--text-muted)" }}>Live visualization of AURA&apos;s persistent memory network.</p>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-            onClick={fetchBrainData}
-            disabled={loading}
-            title="Refresh brain data"
-            style={{
-              width: 34, height: 34, borderRadius: 10, border: "1px solid var(--border)",
-              background: "var(--bg-card)", display: "flex", alignItems: "center", justifyContent: "center",
-              cursor: "pointer", color: "var(--text-muted)",
-            }}
-          >
-            <motion.div animate={{ rotate: loading ? 360 : 0 }} transition={{ duration: 1, repeat: loading ? Infinity : 0, ease: "linear" }}>
-              <RefreshCw style={{ width: 14, height: 14 }} />
-            </motion.div>
-          </motion.button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "6px 14px",
+              background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10,
+            }}>
+              <Search style={{ width: 14, height: 14, color: "var(--text-muted)" }} />
+              <input
+                placeholder="Search brain..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{ background: "none", border: "none", outline: "none", color: "white", fontSize: 12, width: 140, fontFamily: "'Inter', sans-serif" }}
+              />
+            </div>
+            <motion.button
+              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+              onClick={fetchBrainData}
+              disabled={loading}
+              title="Refresh brain data"
+              style={{
+                width: 34, height: 34, borderRadius: 10, border: "1px solid var(--border)",
+                background: "var(--bg-card)", display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: "pointer", color: "var(--text-muted)",
+              }}
+            >
+              <motion.div animate={{ rotate: loading ? 360 : 0 }} transition={{ duration: 1, repeat: loading ? Infinity : 0, ease: "linear" }}>
+                <RefreshCw style={{ width: 14, height: 14 }} />
+              </motion.div>
+            </motion.button>
+          </div>
         </div>
-      </header>
-
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 20px" }} className="scrollbar-hide">
 
         {/* Stats Row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 18 }}>
@@ -166,8 +170,8 @@ export default function MemoryPage() {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 14, marginBottom: 16 }}>
 
           {/* Neural Brain Graph */}
-          <div className="glass-card" style={{ minHeight: 340, position: "relative", overflow: "hidden" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div className="glass-card" style={{ minHeight: 520, position: "relative", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexShrink: 0 }}>
               <div className="section-header" style={{ marginBottom: 0 }}>Neural Brain Graph</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 10, color: "var(--text-muted)" }}>
@@ -177,27 +181,25 @@ export default function MemoryPage() {
               </div>
             </div>
             {mounted && (
-              <div style={{ width: "100%", minHeight: 280 }}>
+              <div style={{ flex: 1, width: "100%", minHeight: 400, position: "relative" }}>
                 {graphData && graphData.nodes.length > 0 ? (
                   <NeuralBrainGraph
                     nodes={graphData.nodes}
                     edges={graphData.edges}
                     activeNodeId={selectedNode?.id}
-                    width={520}
-                    height={280}
                     onNodeClick={handleNodeClick}
                   />
                 ) : (
-                  <BrainGraphFallback width={520} height={280} />
+                  <BrainGraphFallback />
                 )}
               </div>
             )}
             {/* Legend */}
-            <div style={{ display: "flex", gap: 14, marginTop: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 14px", marginTop: 12, flexShrink: 0, borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 10 }}>
               {Object.entries(FILE_COLORS).map(([name, color]) => (
-                <div key={name} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
-                  <span style={{ fontSize: 9, color: "var(--text-muted)", textTransform: "capitalize" }}>{name}</span>
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, boxShadow: `0 0 6px ${color}` }} />
+                  <span style={{ fontSize: 9.5, color: "var(--text-muted)", textTransform: "capitalize" }}>{name}</span>
                 </div>
               ))}
             </div>

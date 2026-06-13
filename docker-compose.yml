@@ -38,7 +38,7 @@ services:
 
   # ── ChromaDB: Vector memory (semantic search) ───────────────
   chromadb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:0.5.0
     container_name: jarvis_chromadb
     ports:
       - "8001:8000"

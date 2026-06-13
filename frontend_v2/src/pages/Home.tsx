@@ -27,6 +27,59 @@ const EVENT_LABELS: Record<string, string> = {
   direct_response_mode: "Direct response",
 };
 
+const renderMessageContent = (content: string) => {
+  if (!content) return null;
+  const lines = content.split("\n");
+  return (
+    <span className="flex flex-col gap-1.5">
+      {lines.map((line, lineIdx) => {
+        const parseBold = (text: string) => {
+          const parts = text.split(/(\*\*[^*]+\*\*)/g);
+          return parts.map((part, partIdx) => {
+            if (part.startsWith("**") && part.endsWith("**")) {
+              return (
+                <strong key={partIdx} className="text-foreground font-semibold">
+                  {part.slice(2, -2)}
+                </strong>
+              );
+            }
+            return part;
+          });
+        };
+
+        const listMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
+        const numMatch = line.match(/^(\s*)(\d+)[.)]\s+(.*)/);
+
+        if (listMatch) {
+          return (
+            <span key={lineIdx} className="flex gap-1.5 pl-3 leading-relaxed">
+              <span className="text-cyan-400 shrink-0">•</span>
+              <span className="flex-1">{parseBold(listMatch[2])}</span>
+            </span>
+          );
+        } else if (numMatch) {
+          return (
+            <span key={lineIdx} className="flex gap-1.5 pl-3 leading-relaxed">
+              <span className="text-cyan-400 font-semibold shrink-0">{numMatch[2]}.</span>
+              <span className="flex-1">{parseBold(numMatch[3])}</span>
+            </span>
+          );
+        }
+
+        if (line.trim() === "") {
+          return <span key={lineIdx} className="block h-2" />;
+        }
+
+        return (
+          <span key={lineIdx} className="block leading-relaxed">
+            {parseBold(line)}
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
 export default function Home() {
   const [orbState, setOrbState] = useState<VisualizerState>("listening");
   const wsRef = useRef<JarvisWebSocket | null>(null);
@@ -150,7 +203,7 @@ export default function Home() {
                   <span className={`text-[10px] font-mono-os uppercase tracking-wider ${msg.role === "user" ? "text-primary" : "text-secondary"}`}>
                     {msg.role === "user" ? "YOU" : "AURA"}
                   </span>
-                  <p className="text-sm text-foreground/90">{msg.content}</p>
+                  <p className="text-sm text-foreground/90">{renderMessageContent(msg.content)}</p>
                 </div>
               ))}
               <div ref={chatEndRef} />

@@ -24,18 +24,34 @@ class KnowledgeMemory:
         try:
             import chromadb
             from backend.config.settings import settings
+            import asyncio
 
-            self._client = chromadb.HttpClient(
-                host=settings.CHROMA_HOST,
-                port=settings.CHROMA_PORT,
-            )
-            self._client.heartbeat()
-            self._collection = self._client.get_or_create_collection(
-                name=settings.CHROMA_COLLECTION,
-                metadata={"hnsw:space": "cosine"},
-            )
-            self._available = True
-            logger.info("KnowledgeMemory connected to ChromaDB")
+            max_retries = 5
+            retry_delay = 2.0
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    self._client = chromadb.HttpClient(
+                        host=settings.CHROMA_HOST,
+                        port=settings.CHROMA_PORT,
+                    )
+                    self._client.heartbeat()
+                    self._collection = self._client.get_or_create_collection(
+                        name=settings.CHROMA_COLLECTION,
+                        metadata={"hnsw:space": "cosine"},
+                    )
+                    self._available = True
+                    logger.info("KnowledgeMemory connected to ChromaDB")
+                    return
+                except Exception as attempt_err:
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"ChromaDB connection attempt {attempt}/{max_retries} failed. Retrying in {retry_delay}s...",
+                            error=str(attempt_err)
+                        )
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        raise attempt_err
         except Exception as e:
             logger.warning("ChromaDB unavailable, using list fallback", error=str(e))
             self._available = False

@@ -7,7 +7,10 @@ from backend.tools.tools import (
     GoogleCalendarTool,
     GmailTool,
     TwilioTool,
+    TwilioSmsTool,
+    TwilioCallTool,
     BrowserTool,
+    ClockTool,
 )
 from backend.tools.system_tool import LocalSystemTool
 from backend.tools.base_tool import BaseTool
@@ -25,7 +28,12 @@ class ToolRegistry:
         logger.info("Tool registered", name=tool.name, configured=tool.is_configured())
 
     def get(self, name: str) -> Optional[BaseTool]:
-        return self._tools.get(name)
+        if name in self._tools:
+            return self._tools.get(name)
+        # Map planner tool aliases (twilio_sms/twilio_call) to the registered "twilio" tool
+        if name in {"twilio_sms", "twilio_call"}:
+            return self._tools.get("twilio")
+        return None
 
     def list_all(self) -> list[dict]:
         return [t.get_info() for t in self._tools.values()]
@@ -49,8 +57,11 @@ def create_registry() -> ToolRegistry:
     registry.register(GoogleCalendarTool())
     registry.register(GmailTool())
     registry.register(TwilioTool())
+    registry.register(TwilioSmsTool())
+    registry.register(TwilioCallTool())
     registry.register(BrowserTool())
     registry.register(LocalSystemTool())
+    registry.register(ClockTool())
     return registry
 
 
