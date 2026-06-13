@@ -124,9 +124,7 @@ export default function JarvisPage() {
   useEffect(() => {
     if (!showWelcome) return;
 
-    let decayTimer: any = null;
-    let targetPlaybackRate = 0;
-    let currentPlaybackRate = 0;
+    let targetTime = 0;
     let animationId: number;
     const video = videoRef.current;
 
@@ -140,41 +138,20 @@ export default function JarvisPage() {
     const updatePlayback = () => {
       const vid = videoRef.current;
       if (vid && vid.duration && !isNaN(vid.duration)) {
-        // Stop scrubbing/playing if we are at or past the end of the video
-        if (vid.currentTime >= vid.duration - 0.05) {
-          vid.playbackRate = 0;
-          currentPlaybackRate = 0;
-          targetPlaybackRate = 0;
-          if (!vid.paused) vid.pause();
-          setVideoProgress(1.0);
+        // Smoothly interpolate current time toward target time
+        const diff = targetTime - vid.currentTime;
+        if (Math.abs(diff) > 0.005) {
+          vid.currentTime = Math.min(vid.duration - 0.02, Math.max(0.0, vid.currentTime + diff * 0.18));
+        }
+
+        // Keep progress bar updated
+        const progress = vid.currentTime / vid.duration;
+        setVideoProgress(progress);
+
+        if (progress >= 0.98) {
           setWelcomeEnded(true);
         } else {
-          // Interpolate the playback speed smoothly
-          currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * 0.1;
-          
-          // Handle play/pause states based on rate thresholds
-          if (Math.abs(currentPlaybackRate) > 0.05) {
-            if (vid.paused) {
-              vid.play().catch(() => {});
-            }
-            // Set direction and speed
-            vid.playbackRate = Math.min(3.0, Math.max(0.1, currentPlaybackRate));
-          } else {
-            currentPlaybackRate = 0;
-            if (!vid.paused) {
-              vid.pause();
-            }
-          }
-
-          // Keep progress bar updated
-          const progress = vid.currentTime / vid.duration;
-          setVideoProgress(progress);
-
-          if (progress >= 0.99) {
-            setWelcomeEnded(true);
-          } else {
-            setWelcomeEnded(false);
-          }
+          setWelcomeEnded(false);
         }
       }
       animationId = requestAnimationFrame(updatePlayback);
@@ -187,35 +164,16 @@ export default function JarvisPage() {
       const vid = videoRef.current;
       if (!vid) return;
 
-      // Do nothing if video has already ended
-      if (vid.currentTime >= vid.duration - 0.05) {
-        setWelcomeEnded(true);
-        return;
-      }
-
-      // Reset decay timer on active scroll
-      if (decayTimer) clearTimeout(decayTimer);
-
-      // Scroll Down -> Forward speed boost. Scroll Up -> Let it slow down/pause
-      if (e.deltaY > 0) {
-        // Boost playback speed forward proportionally to wheel movement
-        targetPlaybackRate = Math.min(3.0, targetPlaybackRate + 0.4);
-      } else {
-        // Slow down or brake
-        targetPlaybackRate = Math.max(0.0, targetPlaybackRate - 0.4);
-      }
-
-      // Smoothly decay/stop playback speed when user stops scrolling
-      decayTimer = setTimeout(() => {
-        targetPlaybackRate = 0;
-      }, 150);
+      // Calculate new target time based on scroll delta
+      // e.deltaY > 0 is scroll down (forward), e.deltaY < 0 is scroll up (backward)
+      const scrollStep = 0.08; // seconds to scrub per scroll tick (adjust for sensitivity)
+      targetTime = Math.min(vid.duration - 0.02, Math.max(0.0, targetTime + (e.deltaY > 0 ? scrollStep : -scrollStep)));
     };
 
     window.addEventListener("wheel", handleWheel, { passive: false });
     return () => {
       window.removeEventListener("wheel", handleWheel);
       cancelAnimationFrame(animationId);
-      if (decayTimer) clearTimeout(decayTimer);
     };
   }, [showWelcome]);
 
