@@ -504,3 +504,13 @@ body {
 .text-red {
   color: var(--accent-red)
 }
+
+/* Responsive Mobile Rules */
+@media (max-width: 768px) {
+  .panel-sidebar {
+    display: none !important;
+  }
+  .panel-main {
+    margin-left: 0px !important;
+  }
+}

@@ -98,6 +98,17 @@ const RECENT_ACTIVITY = [
   { label: "Protocol Execution", desc: 'Executed "Data Synthesis" protocol', time: "32m ago", color: "#10b981" },
 ];
 
+function isValidVizData(vd: any): boolean {
+  if (!vd) return false;
+  return !!(
+    (vd.rows && vd.rows.length > 0) ||
+    (vd.metrics && vd.metrics.length > 0) ||
+    (vd.headers && vd.headers.length > 0) ||
+    (vd.tableRows && vd.tableRows.length > 0) ||
+    vd.code
+  );
+}
+
 export default function JarvisPage() {
   const [sessionId, setSessionId] = useState("");
   const [detectedGender, setDetectedGender] = useState<"sir" | "ma'am">("sir");
@@ -169,7 +180,10 @@ export default function JarvisPage() {
             if (vid.paused) {
               vid.play().catch(() => {});
             }
-            vid.playbackRate = Math.min(3.0, currentPlaybackRate);
+            const desiredRate = Math.min(3.0, currentPlaybackRate);
+            if (Math.abs(vid.playbackRate - desiredRate) > 0.05) {
+              vid.playbackRate = desiredRate;
+            }
           }
         }
         // Backward scrubbing: Use manual frame seeking (reverse is not natively supported)
@@ -232,9 +246,48 @@ export default function JarvisPage() {
       }, 120);
     };
 
+    let touchStartY = 0;
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0].clientY;
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      // Prevent browser default scroll/bounce behavior on welcome video
+      e.preventDefault();
+      if (decayTimer) clearTimeout(decayTimer);
+
+      const touchY = e.touches[0].clientY;
+      const deltaY = touchStartY - touchY;
+      touchStartY = touchY;
+
+      const vid = videoRef.current;
+      if (vid && vid.duration && !isNaN(vid.duration)) {
+        if (deltaY > 0) {
+          // Swipe up / Scroll down: increase forward speed
+          if (vid.currentTime < vid.duration - 0.1) {
+            targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.25);
+          } else {
+            targetPlaybackRate = 0;
+            currentPlaybackRate = 0;
+          }
+        } else if (deltaY < 0) {
+          // Swipe down / Scroll up: trigger backward speed
+          targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.25);
+        }
+      }
+
+      decayTimer = setTimeout(() => {
+        targetPlaybackRate = 0;
+      }, 120);
+    };
+
     window.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("touchstart", handleTouchStart, { passive: false });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
     return () => {
       window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
       cancelAnimationFrame(animationId);
       if (decayTimer) clearTimeout(decayTimer);
     };
@@ -314,14 +367,23 @@ export default function JarvisPage() {
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
   const isVoiceEnabledRef = useRef(isVoiceEnabled);
 
+  const [isMobile, setIsMobile] = useState(false);
+
   // Responsive visualizer sizing: scales down at windowed heights, full size at fullscreen (>=900px)
   const [vizSize, setVizSize] = useState(460);
   const [vizWidth, setVizWidth] = useState(740);
 
   useEffect(() => {
     const updateVizSize = () => {
+      const vw = window.innerWidth;
       const vh = window.innerHeight;
-      if (vh >= 900) {
+      const mobile = vw < 768;
+      setIsMobile(mobile);
+
+      if (mobile) {
+        setVizSize(Math.min(280, vw - 40));
+        setVizWidth(Math.min(320, vw - 20));
+      } else if (vh >= 900) {
         setVizSize(460);
         setVizWidth(740);
       } else {
@@ -849,7 +911,10 @@ export default function JarvisPage() {
         let vizData: VizData | null = null;
         // 1. Backend-provided hint (most reliable)
         if (vizHint && vizHint.viz_type) {
-          vizData = parseVizHint(vizHint, responderAgent);
+          const parsed = parseVizHint(vizHint, responderAgent);
+          if (isValidVizData(parsed)) {
+            vizData = parsed;
+          }
         }
         // 2. Frontend parser as fallback
         if (!vizData) {
@@ -1139,7 +1204,7 @@ export default function JarvisPage() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
         {/* ── Split Panel Content (Visualizer on Left, Chat on Right) ── */}
-        <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", flexDirection: isMobile ? "column" : "row", overflow: isMobile ? "auto" : "hidden" }}>
 
           {/* Left Column: Core Controls & Visualizer */}
           <div style={{
@@ -1171,7 +1236,7 @@ export default function JarvisPage() {
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              paddingLeft: "clamp(60px, 19vw, 260px)",
+              paddingLeft: isMobile ? 0 : "clamp(60px, 19vw, 260px)",
               position: "relative"
             }}>
 
@@ -1200,38 +1265,42 @@ export default function JarvisPage() {
                   className="orb-canvas-section"
                   style={{ position: "relative", top: isWindowed ? 55 : 0, display: "flex", justifyContent: "center", alignItems: "center", minHeight: vizSize, margin: "0 auto", marginTop: orbMarginTop, marginBottom: orbMarginBottom, width: "100%", maxWidth: vizWidth + 20 }}>
 
-                  {/* Floating badges around orb */}
-                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }}
-                    className="orb-badge" style={{ position: "absolute", left: -70, top: 70, zIndex: 20 }}>
-                    <div className="badge-label">System Health</div>
-                    <div className="badge-value">{liveStats?.system_health ?? 92}<span style={{ fontSize: 11, color: "var(--text-secondary)" }}>%</span></div>
-                    <div className={liveStats ? (liveStats.system_health >= 90 ? "badge-sub text-green" : liveStats.system_health >= 80 ? "badge-sub text-cyan" : "badge-sub text-amber") : "badge-sub text-green"}>
-                      {liveStats ? (liveStats.system_health >= 90 ? "Excellent" : liveStats.system_health >= 80 ? "Optimal" : "Degraded") : "Excellent"}
-                    </div>
-                  </motion.div>
+                  {/* Floating badges around orb (Desktop only) */}
+                  {!isMobile && (
+                    <>
+                      <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }}
+                        className="orb-badge" style={{ position: "absolute", left: -70, top: 70, zIndex: 20 }}>
+                        <div className="badge-label">System Health</div>
+                        <div className="badge-value">{liveStats?.system_health ?? 92}<span style={{ fontSize: 11, color: "var(--text-secondary)" }}>%</span></div>
+                        <div className={liveStats ? (liveStats.system_health >= 90 ? "badge-sub text-green" : liveStats.system_health >= 80 ? "badge-sub text-cyan" : "badge-sub text-amber") : "badge-sub text-green"}>
+                          {liveStats ? (liveStats.system_health >= 90 ? "Excellent" : liveStats.system_health >= 80 ? "Optimal" : "Degraded") : "Excellent"}
+                        </div>
+                      </motion.div>
 
-                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }}
-                    className="orb-badge" style={{ position: "absolute", right: -10, top: 70, zIndex: 20 }}>
-                    <div className="badge-label">Neural Sync</div>
-                    <div className="badge-value">{liveStats?.neural_sync ?? 98.7}<span style={{ fontSize: 11, color: "var(--text-secondary)" }}>%</span></div>
-                    <div className={liveStats ? (liveStats.neural_sync >= 90 ? "badge-sub text-cyan" : "badge-sub text-amber") : "badge-sub text-cyan"}>
-                      {liveStats ? (liveStats.neural_sync >= 90 ? "Stable" : "Offline") : "Stable"}
-                    </div>
-                  </motion.div>
+                      <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }}
+                        className="orb-badge" style={{ position: "absolute", right: -10, top: 70, zIndex: 20 }}>
+                        <div className="badge-label">Neural Sync</div>
+                        <div className="badge-value">{liveStats?.neural_sync ?? 98.7}<span style={{ fontSize: 11, color: "var(--text-secondary)" }}>%</span></div>
+                        <div className={liveStats ? (liveStats.neural_sync >= 90 ? "badge-sub text-cyan" : "badge-sub text-amber") : "badge-sub text-cyan"}>
+                          {liveStats ? (liveStats.neural_sync >= 90 ? "Stable" : "Offline") : "Stable"}
+                        </div>
+                      </motion.div>
 
-                  <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }}
-                    className="orb-badge" style={{ position: "absolute", left: -50, bottom: 70, zIndex: 20 }}>
-                    <div className="badge-label">Memory Stream</div>
-                    <div className="badge-value">{liveStats?.memory_stream_tb ?? 2.34} <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>TB</span></div>
-                  </motion.div>
+                      <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }}
+                        className="orb-badge" style={{ position: "absolute", left: -50, bottom: 70, zIndex: 20 }}>
+                        <div className="badge-label">Memory Stream</div>
+                        <div className="badge-value">{liveStats?.memory_stream_tb ?? 2.34} <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>TB</span></div>
+                      </motion.div>
 
-                  <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.8 }}
-                    className="orb-badge" style={{ position: "absolute", right: 0, bottom: 70, zIndex: 20 }}>
-                    <div className="badge-label">Active State</div>
-                    <div className="badge-value" style={{ fontSize: 13 }}>
-                      {visualizerState === "idle" ? "Standing By" : visualizerState === "listening" ? "Listening" : "Processing"}
-                    </div>
-                  </motion.div>
+                      <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.8 }}
+                        className="orb-badge" style={{ position: "absolute", right: 0, bottom: 70, zIndex: 20 }}>
+                        <div className="badge-label">Active State</div>
+                        <div className="badge-value" style={{ fontSize: 13 }}>
+                          {visualizerState === "idle" ? "Standing By" : visualizerState === "listening" ? "Listening" : "Processing"}
+                        </div>
+                      </motion.div>
+                    </>
+                  )}
 
                   {/* The Orb */}
                   <AuraOrb state={visualizerState} amplitude={amplitude} size={vizSize} width={vizWidth} coworker={activeCoworker} />
@@ -1246,17 +1315,19 @@ export default function JarvisPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
+                  justifyContent: isMobile ? "flex-start" : "center",
                   gap: 12,
-                  margin: isWindowed ? "2px auto 6px" : "6px auto 10px",
+                  margin: isMobile ? "10px auto" : (isWindowed ? "2px auto 6px" : "6px auto 10px"),
                   background: "rgba(255, 255, 255, 0.02)",
                   backdropFilter: "blur(24px)",
                   border: "1px solid rgba(255, 255, 255, 0.05)",
                   borderRadius: 20,
-                  padding: "6px 12px",
-                  width: "fit-content",
+                  padding: "8px 12px",
+                  width: isMobile ? "calc(100% - 32px)" : "fit-content",
+                  overflowX: isMobile ? "auto" : "visible",
                   boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.2)",
                 }}
+                className="scrollbar-hide"
               >
                 {[
                   { id: "#general-chat", label: "Jarvis", role: "AI Assistant", icon: Brain, color: "var(--accent-cyan)", glow: "rgba(0, 212, 255, 0.3)" },
@@ -1362,14 +1433,16 @@ export default function JarvisPage() {
 
           {/* Right Column: Floating Chat Card (Detached & Top-Right Aligned) */}
           <div style={{
-            width: 350,
-            height: 280,
+            width: isMobile ? "calc(100% - 32px)" : 350,
+            height: isMobile ? 240 : 280,
             flexShrink: 0,
             display: "flex",
             flexDirection: "column",
-            alignSelf: "flex-start",
-            marginTop: 16,
-            marginRight: 32,
+            alignSelf: isMobile ? "center" : "flex-start",
+            marginTop: isMobile ? 24 : 16,
+            marginRight: isMobile ? 0 : 32,
+            marginLeft: isMobile ? 0 : 0,
+            marginBottom: isMobile ? 24 : 0,
             borderRadius: 20,
             border: "1px solid var(--border)",
             background: "var(--bg-card)",

@@ -541,16 +541,16 @@ async def google_callback(state: str, code: str):
 
 # Mapping ElevenLabs Voice IDs to high-quality Microsoft Edge-TTS Neural Voices
 VOICE_MAPPING = {
-    # Default Rachel (Female) -> en-US-AriaNeural
-    "21m00Tcm4TlvDq8ikWAM": "en-US-AriaNeural",
+    # Default Rachel (Female) -> en-US-AvaNeural
+    "21m00Tcm4TlvDq8ikWAM": "en-US-AvaNeural",
     # Sarah (Support - Warm Female) -> en-US-EmmaNeural
     "zGjIP4SZlMnY9m93k97r": "en-US-EmmaNeural",
     # Claire (Systems Engineer - Professional Female) -> en-US-JennyNeural
     "c3QefzBhE1Cx4Yl23IV3": "en-US-JennyNeural",
     # Bobby (Growth - Energetic Male) -> en-US-ChristopherNeural
     "86ZLAUcyPNBrbdJKn3u6": "en-US-ChristopherNeural",
-    # Default voice ID in some configs -> en-US-AriaNeural
-    "GoGUcAZovo4MFeLxJdZd": "en-US-AriaNeural",
+    # Default voice ID in some configs -> en-US-AvaNeural
+    "GoGUcAZovo4MFeLxJdZd": "en-US-AvaNeural",
     # New agent voice mapping placeholders
     "elena_voice_id_placeholder": "en-US-AnaNeural",
     "marcus_voice_id_placeholder": "en-US-GuyNeural",

@@ -48,8 +48,8 @@ class Settings(BaseSettings):
 
     # TTS Settings
     TTS_PROVIDER: str = "edge-tts" # "edge-tts" (free neural), "elevenlabs" (paid premium), "deepgram" (paid premium)
-    EDGE_TTS_VOICE: str = "en-US-AriaNeural" # Default high quality free voice
-    TTS_SPEED: str = "+12%"                  # Speed of Edge-TTS voice (e.g. "+10%" or "-10%")
+    EDGE_TTS_VOICE: str = "en-US-AvaNeural" # Default high quality free voice
+    TTS_SPEED: str = "+22%"                  # Speed of Edge-TTS voice (e.g. "+10%" or "-10%")
 
 
     # Groq Cloud LLM (optional)

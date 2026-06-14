@@ -331,24 +331,20 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
   return (
     <AnimatePresence>
       {data && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            key="viz-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.55)",
-              zIndex: 9990,
-              backdropFilter: "blur(4px)",
-              WebkitBackdropFilter: "blur(4px)",
-            }}
-          />
-
+        <div
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px))`,
+            zIndex: 9991,
+            width: "min(580px, 90vw)",
+            maxHeight: "80vh",
+            display: "flex",
+            flexDirection: "column",
+            pointerEvents: "auto",
+          }}
+        >
           {/* Panel */}
           <motion.div
             key="viz-panel"
@@ -357,15 +353,10 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
             exit={{ opacity: 0, scale: 0.94, y: 24 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             style={{
-              position: "fixed",
-              top: "50%",
-              left: "50%",
-              transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px))`,
-              zIndex: 9991,
-              width: "min(580px, 90vw)",
-              maxHeight: "80vh",
+              width: "100%",
               display: "flex",
               flexDirection: "column",
+              maxHeight: "80vh",
             }}
           >
             <div
@@ -393,6 +384,7 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
                   borderBottom: `1px solid rgba(${hexToRgb(color)}, 0.12)`,
                   background: `rgba(${hexToRgb(color)}, 0.05)`,
                   flexShrink: 0,
+                  cursor: "grab",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -523,7 +515,7 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
               </div>
             </div>
           </motion.div>
-        </>
+        </div>
       )}
     </AnimatePresence>
   );

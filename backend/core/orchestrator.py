@@ -173,7 +173,7 @@ def is_plan_read_only(plan: dict) -> bool:
 
 
 def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[str]:
-    msg_clean = user_message.lower()
+    msg_clean = user_message.lower().strip()
     
     # Coworker channels and keyword mappings
     coworkers = {
@@ -187,33 +187,15 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
         "#product-roadmap": ["mia", "roadmap", "planner", "plan"]
     }
     
-    # Action keywords that imply switching, talking, routing, calling, asking
-    switch_triggers = [
-        "switch to", "switch with", "change to", "go to", "talk to", "speak with",
-        "route to", "ask", "call", "ring", "tell"
-    ]
-    
-    # Check if a switch action is implied
-    is_switch_action = any(trigger in msg_clean for trigger in switch_triggers)
-    # Also support direct commands like "sarah", "bobby", "switch sarah", etc.
-    if not is_switch_action:
-        words = msg_clean.split()
-        if len(words) <= 3 and any(w in ["switch", "go", "select"] for w in words):
-            is_switch_action = True
-        elif len(words) == 1 and words[0] in ["sarah", "bobby", "claire", "jarvis", "elena", "marcus", "lex", "mia"]:
-            is_switch_action = True
-            
-    if is_switch_action:
-        # Find the target coworker
-        for channel, names in coworkers.items():
-            if channel == current_channel:
-                continue
-            for name in names:
-                # Use word boundaries to avoid matching sub-words (like "tomorrow" matching "tom")
-                import re
-                if re.search(rf"\b{name}\b", msg_clean):
-                    return channel
-                    
+    # Check if a coworker name is mentioned as a standalone word anywhere in the query
+    for channel, names in coworkers.items():
+        if channel == current_channel:
+            continue
+        for name in names:
+            import re
+            if re.search(rf"\b{name}\b", msg_clean):
+                return channel
+                
     return None
 
 
@@ -333,8 +315,8 @@ class Orchestrator:
             
             for agent_name, text in rollcall_steps:
                 await emit(session_id, "final_response", content=text, agent=agent_name)
-                # Pause 2.2 seconds for ultra-fast seamless transition
-                await asyncio.sleep(2.2)
+                # Pause 1.2 seconds for ultra-fast seamless transition
+                await asyncio.sleep(1.2)
                 
             elapsed_ms = (time.monotonic() - start_time) * 1000
             await emit(session_id, "pipeline_complete", elapsed_ms=round(elapsed_ms), response_preview="ARISE rollcall complete.")
@@ -419,8 +401,8 @@ class Orchestrator:
             
             for agent_name, text in conference_turns:
                 await emit(session_id, "final_response", content=text, agent=agent_name)
-                # Pause 2.5 seconds for snappy updates
-                await asyncio.sleep(2.5)
+                # Pause 1.2 seconds for snappy updates
+                await asyncio.sleep(1.2)
                 
             elapsed_ms = (time.monotonic() - start_time) * 1000
             await emit(session_id, "pipeline_complete", elapsed_ms=round(elapsed_ms), response_preview="Conference call complete.")
@@ -447,10 +429,14 @@ class Orchestrator:
         pending_plan = await short_term_memory.get(session_id, "pending_plan")
         if pending_plan:
             clean_msg = user_message.lower().strip().rstrip('.').rstrip('!').rstrip('?')
-            is_positive = clean_msg in {
-                "yes", "y", "confirm", "proceed", "go", "go ahead", "ok", "okay", "sure", 
-                "do it", "run", "execute", "yeah", "yep"
-            }
+            
+            positive_words = {"yes", "y", "confirm", "proceed", "go", "ok", "okay", "sure", "run", "execute", "yeah", "yep"}
+            msg_words = set(clean_msg.split())
+            is_positive = bool(msg_words & positive_words or "go ahead" in clean_msg or "do it" in clean_msg or "yes please" in clean_msg)
+            
+            negative_words = {"no", "n", "cancel", "stop", "dont", "don't", "abort", "reject"}
+            is_negative = bool(msg_words & negative_words or "dont do it" in clean_msg or "don't do it" in clean_msg or "no thanks" in clean_msg)
+            
             if is_positive:
                 logger.info("User confirmed pending plan. Executing...", session_id=session_id)
                 await short_term_memory.delete(session_id, "pending_plan")
@@ -502,9 +488,20 @@ class Orchestrator:
                     "critic_verdict": critic_verdict,
                     "elapsed_ms": round(elapsed_ms)
                 }
-            else:
-                logger.info("User cancelled or did not confirm pending plan. Clearing state.", session_id=session_id)
+            elif is_negative:
+                logger.info("User explicitly cancelled pending plan. Clearing state.", session_id=session_id)
                 await short_term_memory.delete(session_id, "pending_plan")
+                cancel_msg = "Understood. Action cancelled, sir."
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                await emit(session_id, "final_response", content=cancel_msg, agent=active_agent_name)
+                await emit(session_id, "pipeline_complete", elapsed_ms=round(elapsed_ms), response_preview=cancel_msg)
+                return {
+                    "response": cancel_msg,
+                    "intent": {"intent": "cancel", "category": "conversation"},
+                    "elapsed_ms": round(elapsed_ms)
+                }
+            else:
+                logger.info("User input is neutral. Keeping pending plan in context.", session_id=session_id)
 
         # Proactive Bypass: Direct calendar check without heavy multi-agent LLM pipeline
         if session_id == "__proactive_calendar_check__":
