@@ -828,7 +828,7 @@ def generate_dynamic_welcome_message(gender: str = "sir", client_tz: Optional[st
 # ── WebSocket Endpoint ─────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str = "sir", timezone: Optional[str] = Query(None)):
+async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str = "sir", timezone_query: Optional[str] = Query(None, alias="timezone")):
     """
     Real-time WebSocket for streaming agent events and chat.
 
@@ -837,19 +837,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str 
                    {"type": "final_response", "response": "..."}
     """
     await websocket.accept()
-    logger.info("WebSocket connected", session_id=session_id, gender=gender, timezone=timezone)
+    logger.info("WebSocket connected", session_id=session_id, gender=gender, timezone=timezone_query)
 
     if gender not in ["sir", "ma'am"]:
         gender = "sir"
     await short_term_memory.set(session_id, "gender", gender)
-    if timezone:
-        await short_term_memory.set(session_id, "timezone", timezone)
+    if timezone_query:
+        await short_term_memory.set(session_id, "timezone", timezone_query)
 
     # Subscribe to this session's events
     event_queue = message_bus.subscribe(session_id)
 
     # Send welcome event
-    welcome_msg = generate_dynamic_welcome_message(gender, timezone)
+    welcome_msg = generate_dynamic_welcome_message(gender, timezone_query)
     await websocket.send_json({
         "type": "connected",
         "session_id": session_id,
