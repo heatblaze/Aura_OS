@@ -393,8 +393,8 @@ class ClockTool(BaseTool):
 
     async def _run(self, params: dict) -> ToolResult:
         location = params.get("location", "").strip()
-        if not location:
-            return ToolResult(success=False, error="No location provided.")
+        if not location or location.lower() in {"local", "user", "current", "my", "me"}:
+            location = params.get("client_timezone") or "Asia/Kolkata"
 
         import zoneinfo
         from datetime import datetime

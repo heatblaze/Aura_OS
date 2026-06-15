@@ -70,6 +70,14 @@ class ExecutorAgent(BaseAgent):
         tool_name = step.get("tool")
         params = step.get("tool_params", {})
         params["user_id"] = user_id
+        params["session_id"] = session_id
+        
+        # Inject client timezone if available
+        from backend.memory.short_term import short_term_memory
+        client_tz = await short_term_memory.get(session_id, "timezone")
+        if client_tz:
+            params["client_timezone"] = client_tz
+            
         description = step.get("description", "")
 
         await emit(
