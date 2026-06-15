@@ -1314,10 +1314,10 @@ export default function JarvisPage() {
 
                       <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }}
                         className="orb-badge" style={{ position: "absolute", right: -10, top: 70, zIndex: 20 }}>
-                        <div className="badge-label">Neural Sync</div>
+                        <div className="badge-label">Local LLM</div>
                         <div className="badge-value">{liveStats?.neural_sync ?? 98.7}<span style={{ fontSize: 11, color: "var(--text-secondary)" }}>%</span></div>
                         <div className={liveStats ? (liveStats.neural_sync >= 90 ? "badge-sub text-cyan" : "badge-sub text-amber") : "badge-sub text-cyan"}>
-                          {liveStats ? (liveStats.neural_sync >= 90 ? "Stable" : "Offline") : "Stable"}
+                          {liveStats ? (liveStats.neural_sync >= 90 ? "Stable" : "Standby") : "Stable"}
                         </div>
                       </motion.div>
 
