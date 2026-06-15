@@ -1352,7 +1352,7 @@ export default function JarvisPage() {
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: isMobile ? "flex-start" : "center",
+                  justifyContent: "flex-start",
                   gap: 12,
                   margin: isMobile ? "10px auto" : (isWindowed ? "2px auto 6px" : "6px auto 10px"),
                   background: "rgba(255, 255, 255, 0.02)",

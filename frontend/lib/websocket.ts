@@ -16,7 +16,8 @@ export class JarvisWebSocket {
   constructor(sessionId: string, baseUrl?: string, gender = "sir") {
     this.sessionId = sessionId;
     const finalBaseUrl = baseUrl || (typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000") : "ws://localhost:8000");
-    this.url = `${finalBaseUrl}/ws/${sessionId}?gender=${gender}`;
+    const tz = typeof window !== "undefined" ? encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone) : "";
+    this.url = `${finalBaseUrl}/ws/${sessionId}?gender=${gender}&timezone=${tz}`;
   }
 
   connect(): Promise<void> {

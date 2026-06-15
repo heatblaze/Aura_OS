@@ -747,13 +747,24 @@ async def text_to_speech(request: TTSRequest):
     return StreamingResponse(edge_tts_streamer(), media_type="audio/mpeg")
 
 
-def generate_dynamic_welcome_message(gender: str = "sir") -> str:
+def generate_dynamic_welcome_message(gender: str = "sir", client_tz: Optional[str] = None) -> str:
     import random
     from datetime import datetime
+    from zoneinfo import ZoneInfo
     
-    # Since the backend is running locally on the user's host machine,
-    # datetime.now() represents the user's exact local time.
-    hour = datetime.now().hour
+    if client_tz:
+        try:
+            tz = ZoneInfo(client_tz)
+            hour = datetime.now(tz).hour
+        except Exception:
+            hour = datetime.now().hour
+    else:
+        # Default fallback to Asia/Kolkata timezone
+        try:
+            tz = ZoneInfo("Asia/Kolkata")
+            hour = datetime.now(tz).hour
+        except Exception:
+            hour = datetime.now().hour
     
     if 5 <= hour < 12:
         time_greeting = "Good morning"
@@ -817,7 +828,7 @@ def generate_dynamic_welcome_message(gender: str = "sir") -> str:
 # ── WebSocket Endpoint ─────────────────────────────────────────
 
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str = "sir"):
+async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str = "sir", timezone: Optional[str] = Query(None)):
     """
     Real-time WebSocket for streaming agent events and chat.
 
@@ -826,17 +837,19 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str 
                    {"type": "final_response", "response": "..."}
     """
     await websocket.accept()
-    logger.info("WebSocket connected", session_id=session_id, gender=gender)
+    logger.info("WebSocket connected", session_id=session_id, gender=gender, timezone=timezone)
 
     if gender not in ["sir", "ma'am"]:
         gender = "sir"
     await short_term_memory.set(session_id, "gender", gender)
+    if timezone:
+        await short_term_memory.set(session_id, "timezone", timezone)
 
     # Subscribe to this session's events
     event_queue = message_bus.subscribe(session_id)
 
     # Send welcome event
-    welcome_msg = generate_dynamic_welcome_message(gender)
+    welcome_msg = generate_dynamic_welcome_message(gender, timezone)
     await websocket.send_json({
         "type": "connected",
         "session_id": session_id,
