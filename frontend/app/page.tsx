@@ -167,7 +167,7 @@ export default function JarvisPage() {
         }
 
         // Forward scrubbing: Use native GPU-accelerated video playback (silky smooth)
-        if (currentPlaybackRate > 0.05) {
+        if (currentPlaybackRate >= 0.0625) {
           // Double-check clamp to prevent any play() calls when near the end
           if (vid.currentTime >= vid.duration - 0.1) {
             vid.currentTime = vid.duration - 0.1;
@@ -180,7 +180,7 @@ export default function JarvisPage() {
             if (vid.paused) {
               vid.play().catch(() => {});
             }
-            const desiredRate = Math.min(3.0, currentPlaybackRate);
+            const desiredRate = Math.max(0.0625, Math.min(3.0, currentPlaybackRate));
             if (Math.abs(vid.playbackRate - desiredRate) > 0.05) {
               vid.playbackRate = desiredRate;
             }
@@ -381,7 +381,7 @@ export default function JarvisPage() {
       setIsMobile(mobile);
 
       if (mobile) {
-        setVizSize(Math.min(280, vw - 40));
+        setVizSize(Math.min(240, vw - 60));
         setVizWidth(Math.min(320, vw - 20));
       } else if (vh >= 900) {
         setVizSize(460);
@@ -937,7 +937,9 @@ export default function JarvisPage() {
         const confirmMsg = event.message || "Confirmation required to proceed.";
         const targetChannel = activeChannelRef.current;
         setIsProcessing(false);
-        speakText(confirmMsg, "Jarvis", targetChannel);
+        const ev = event as any;
+        const agent = ev.agent || activeCoworker;
+        speakText(confirmMsg, agent, targetChannel);
       } else if (event.type === "pipeline_complete") {
         // Conference modal is now closed via the speech-queue drain in onSpeechFinished — nothing needed here
         void 0;
@@ -967,14 +969,36 @@ export default function JarvisPage() {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
         {lines.map((line, lineIdx) => {
-          const parseBold = (text: string) => {
-            const parts = text.split(/(\*\*[^*]+\*\*)/g);
+          const parseRichText = (text: string) => {
+            const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
             return parts.map((part, partIdx) => {
               if (part.startsWith("**") && part.endsWith("**")) {
                 return (
                   <strong key={partIdx} style={{ color: "white", fontWeight: 600 }}>
                     {part.slice(2, -2)}
                   </strong>
+                );
+              }
+              if (part.startsWith("`") && part.endsWith("`")) {
+                return (
+                  <code key={partIdx} style={{ 
+                    fontFamily: "var(--font-mono, monospace)", 
+                    background: "rgba(255, 255, 255, 0.08)", 
+                    padding: "2px 6px", 
+                    borderRadius: "4px", 
+                    fontSize: "0.85em",
+                    color: "var(--accent-cyan)",
+                    border: "1px solid rgba(255, 255, 255, 0.05)"
+                  }}>
+                    {part.slice(1, -1)}
+                  </code>
+                );
+              }
+              if (part.startsWith("*") && part.endsWith("*")) {
+                return (
+                  <em key={partIdx} style={{ fontStyle: "italic", color: "rgba(255,255,255,0.9)" }}>
+                    {part.slice(1, -1)}
+                  </em>
                 );
               }
               return part;
@@ -990,7 +1014,7 @@ export default function JarvisPage() {
             return (
               <div key={lineIdx} style={{ display: "flex", gap: 6, paddingLeft: 12, lineHeight: 1.5 }}>
                 <span style={{ color: "var(--accent-cyan)", flexShrink: 0 }}>•</span>
-                <span style={{ flex: 1 }}>{parseBold(listMatch[2])}</span>
+                <span style={{ flex: 1 }}>{parseRichText(listMatch[2])}</span>
               </div>
             );
           } else if (numMatch) {
@@ -999,7 +1023,7 @@ export default function JarvisPage() {
                 <span style={{ color: "var(--accent-cyan)", fontWeight: 600, flexShrink: 0 }}>
                   {numMatch[2]}.
                 </span>
-                <span style={{ flex: 1 }}>{parseBold(numMatch[3])}</span>
+                <span style={{ flex: 1 }}>{parseRichText(numMatch[3])}</span>
               </div>
             );
           }
@@ -1012,7 +1036,7 @@ export default function JarvisPage() {
           // Normal line
           return (
             <div key={lineIdx} style={{ lineHeight: 1.5 }}>
-              {parseBold(line)}
+              {parseRichText(line)}
             </div>
           );
         })}
@@ -1038,7 +1062,16 @@ export default function JarvisPage() {
 
     // Detect conference protocol to activate the meeting modal (ARISE rollcall is separate, no modal)
     const msgLower = msg.toLowerCase();
-    if (msgLower.includes("conference") || msgLower.includes("meeting")) {
+    const isMeetingStart = (
+      /start\s+(meeting|conference)/i.test(msgLower) ||
+      /join\s+(meeting|conference)/i.test(msgLower) ||
+      /initiate\s+(meeting|conference)/i.test(msgLower) ||
+      /call\s+(meeting|conference)/i.test(msgLower) ||
+      /run\s+(meeting|conference)/i.test(msgLower) ||
+      /host\s+(meeting|conference)/i.test(msgLower) ||
+      /setup\s+(meeting|conference)/i.test(msgLower)
+    );
+    if (isMeetingStart) {
       conferenceSessionRef.current = true;
       setConferenceActive(true);
       setConferenceSpeaker(null);
@@ -1056,7 +1089,9 @@ export default function JarvisPage() {
         channel: targetChannel,
         source: source,
         sent_at: Date.now(),
-        gender: detectedGender
+        gender: detectedGender,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        local_time: new Date().toString()
       });
     }
     catch {
@@ -1102,7 +1137,7 @@ export default function JarvisPage() {
               style={{
                 width: "100%",
                 height: "100%",
-                objectFit: "cover",
+                objectFit: isMobile ? "contain" : "cover",
                 pointerEvents: "none"
               }}
             />
@@ -1214,7 +1249,7 @@ export default function JarvisPage() {
             alignItems: "center",
             justifyContent: "flex-start",
             padding: "16px 20px 10px",
-            overflowY: "hidden",
+            overflowY: isMobile ? "visible" : "hidden",
             position: "relative"
           }} className="scrollbar-hide">
 
@@ -1289,7 +1324,9 @@ export default function JarvisPage() {
                       <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.7 }}
                         className="orb-badge" style={{ position: "absolute", left: -50, bottom: 70, zIndex: 20 }}>
                         <div className="badge-label">Memory Stream</div>
-                        <div className="badge-value">{liveStats?.memory_stream_tb ?? 2.34} <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>TB</span></div>
+                        <div className="badge-value" style={{ fontSize: 13, display: "flex", alignItems: "baseline", gap: 3 }}>
+                          {liveStats?.memory_stream ?? "2.34 KB"}
+                        </div>
                       </motion.div>
 
                       <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.8 }}
@@ -1324,7 +1361,8 @@ export default function JarvisPage() {
                   borderRadius: 20,
                   padding: "8px 12px",
                   width: isMobile ? "calc(100% - 32px)" : "fit-content",
-                  overflowX: isMobile ? "auto" : "visible",
+                  maxWidth: "100%",
+                  overflowX: "auto",
                   boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.2)",
                 }}
                 className="scrollbar-hide"
@@ -1356,6 +1394,7 @@ export default function JarvisPage() {
                         display: "flex",
                         alignItems: "center",
                         gap: 6,
+                        flexShrink: 0,
                         transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
                         position: "relative",
                         boxShadow: isActive ? `0 0 16px ${cw.glow}` : "none",

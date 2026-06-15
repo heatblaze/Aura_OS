@@ -2,7 +2,7 @@
 
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, BarChart2, Table, TrendingUp, Code2, Layers } from "lucide-react";
+import { X, BarChart2, Table, TrendingUp, Code2, Layers, Info } from "lucide-react";
 import { VizData } from "@/lib/types";
 
 interface VisualDataPanelProps {
@@ -185,6 +185,23 @@ function CodeRenderer({ code, color }: { code: string; color: string }) {
   );
 }
 
+function InfoRenderer({ text, color }: { text: string; color: string }) {
+  return (
+    <div style={{
+      fontSize: "13px",
+      color: "rgba(255,255,255,0.85)",
+      lineHeight: 1.6,
+      whiteSpace: "pre-wrap",
+      padding: "16px",
+      borderRadius: "10px",
+      background: "rgba(255,255,255,0.02)",
+      border: `1px solid rgba(${hexToRgb(color)}, 0.15)`,
+    }}>
+      {text}
+    </div>
+  );
+}
+
 function LineChartRenderer({ points, color }: { points: { label: string; value: number }[]; color: string }) {
   if (points.length < 2) return <BarChartRenderer rows={points} color={color} />;
   const max = Math.max(...points.map(p => p.value));
@@ -277,6 +294,7 @@ const TYPE_ICONS: Record<string, React.ComponentType<any>> = {
   metrics: Layers,
   code:    Code2,
   line:    TrendingUp,
+  info:    Info,
 };
 
 // ── Main Component ────────────────────────────────────────────
@@ -286,77 +304,38 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
   const color = agentColor(data.agent);
   const IconComp = TYPE_ICONS[data.type] || BarChart2;
 
-  // Draggable window state
-  const [position, setPosition] = React.useState({ x: 0, y: 0 });
-  const isDraggingRef = React.useRef(false);
-  const dragStartRef = React.useRef({ x: 0, y: 0 });
-  const elementStartRef = React.useRef({ x: 0, y: 0 });
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    // Prevent drag on buttons/input elements
-    if ((e.target as HTMLElement).closest("button")) return;
-    
-    isDraggingRef.current = true;
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-    elementStartRef.current = { x: position.x, y: position.y };
-    e.preventDefault();
-  };
-
-  React.useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current) return;
-      const dx = e.clientX - dragStartRef.current.x;
-      const dy = e.clientY - dragStartRef.current.y;
-      setPosition({
-        x: elementStartRef.current.x + dx,
-        y: elementStartRef.current.y + dy,
-      });
-    };
-
-    const handleMouseUp = () => {
-      isDraggingRef.current = false;
-    };
-
-    if (data) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [data]);
-
   return (
     <AnimatePresence>
       {data && (
         <div
           style={{
             position: "fixed",
-            top: "50%",
-            left: "50%",
-            transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px))`,
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
             zIndex: 9991,
-            width: "min(580px, 90vw)",
-            maxHeight: "80vh",
             display: "flex",
-            flexDirection: "column",
-            pointerEvents: "auto",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
           }}
         >
           {/* Panel */}
           <motion.div
             key="viz-panel"
+            drag
+            dragMomentum={false}
             initial={{ opacity: 0, scale: 0.94, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.94, y: 24 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             style={{
-              width: "100%",
+              width: "min(580px, 90vw)",
+              maxHeight: "80vh",
               display: "flex",
               flexDirection: "column",
-              maxHeight: "80vh",
+              pointerEvents: "auto",
             }}
           >
             <div
@@ -375,7 +354,6 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
             >
               {/* Header */}
               <div
-                onMouseDown={handleMouseDown}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -475,6 +453,9 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
                 )}
                 {data.type === "code" && data.code && (
                   <CodeRenderer code={data.code} color={color} />
+                )}
+                {data.type === "info" && data.code && (
+                  <InfoRenderer text={data.code} color={color} />
                 )}
 
                 {/* Mixed: metrics + chart */}

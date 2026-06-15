@@ -106,12 +106,31 @@ async def _build_system_prompt(persona: Optional[dict] = None, session_id: Optio
         self_ref_instruction = f"""
 IMPORTANT: You are currently active as {persona['name']}. Do NOT refer to yourself in the third person (e.g., do NOT say "My colleague {persona['name']} can help you" or "{persona['name']} might be able to assist"). Instead, speak directly in the first person ("I can help you with that").
 Also, do NOT recommend the user switch to your own channel or persona, since you are already active as that persona!
+
+VISUAL DISPLAY PANEL RULE:
+To show the user charts, tables, code blocks, checklists, design metrics, or rich text visual mockups, format your response content using one of these structural syntax:
+1. A Markdown table (pipe-delimited) to show lists, options, or data comparisons.
+2. A fenced JSON code block (```json ... ```) with keys and values to render bar charts or numeric metric cards.
+3. A parenthesized visual instruction like `(Visual description: ...)` to render a rich informational text panel.
+When the user explicitly asks you to show details in a "window", "popup", "chart", "table", or "visual panel", you MUST structure the data with one of the above formats so the system can intercept and display it in a draggable popup window!
 """
     else:
         role_prompt = "You are JARVIS (AURA), an autonomous AI operating system."
 
     from datetime import datetime
-    now = datetime.now().astimezone()
+    from zoneinfo import ZoneInfo
+    client_tz = None
+    if session_id:
+        client_tz = await short_term_memory.get(session_id, "timezone")
+    if not client_tz:
+        client_tz = "Asia/Kolkata"
+        
+    try:
+        tz = ZoneInfo(client_tz)
+        now = datetime.now(tz)
+    except Exception:
+        now = datetime.now().astimezone()
+        
     # Format current_time to be human-readable and natural (e.g. "Tuesday, June 09, 2026, 05:29:32 PM (IST, UTC+05:30)")
     current_time = now.strftime("%A, %B %d, %Y, %I:%M:%S %p (%Z, UTC%z)")
     tz_offset = now.strftime("%z")
@@ -175,28 +194,95 @@ def is_plan_read_only(plan: dict) -> bool:
 def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[str]:
     msg_clean = user_message.lower().strip()
     
-    # Coworker channels and keyword mappings
-    coworkers = {
-        "#support-tickets": ["sarah", "support"],
-        "#business-operations": ["bobby", "growth", "business"],
-        "#engineering-trace": ["claire", "systems", "engineering"],
-        "#general-chat": ["jarvis", "general"],
-        "#creative-design": ["elena", "design", "creative", "graphics"],
-        "#financial-ops": ["marcus", "finance", "budget"],
-        "#security-audit": ["lex", "security", "guard", "audit"],
-        "#product-roadmap": ["mia", "roadmap", "planner", "plan"]
+    # Coworker names mapping
+    names_map = {
+        "sarah": "#support-tickets",
+        "bobby": "#business-operations",
+        "claire": "#engineering-trace",
+        "jarvis": "#general-chat",
+        "elena": "#creative-design",
+        "marcus": "#financial-ops",
+        "lex": "#security-audit",
+        "mia": "#product-roadmap"
     }
     
-    # Check if a coworker name is mentioned as a standalone word anywhere in the query
-    for channel, names in coworkers.items():
+    import re
+    # Check for standalone coworker name mention
+    for name, channel in names_map.items():
         if channel == current_channel:
             continue
-        for name in names:
-            import re
-            if re.search(rf"\b{name}\b", msg_clean):
-                return channel
+        if re.search(rf"\b{name}\b", msg_clean):
+            return channel
+            
+    # Also support explicit channel/area keywords ONLY if preceded by switch commands
+    switch_keywords = {
+        "support": "#support-tickets",
+        "growth": "#business-operations",
+        "business": "#business-operations",
+        "systems": "#engineering-trace",
+        "engineering": "#engineering-trace",
+        "design": "#creative-design",
+        "creative": "#creative-design",
+        "finance": "#financial-ops",
+        "budget": "#financial-ops",
+        "security": "#security-audit",
+        "audit": "#security-audit",
+        "roadmap": "#product-roadmap",
+        "planner": "#product-roadmap",
+        "plan": "#product-roadmap"
+    }
+    
+    # Check if there is an explicit switch instruction
+    switch_patterns = [
+        r"\b(?:switch to|switch with|go to|talk to|speak with|ask|tell)\s+(\w+)\b",
+        r"\b(?:switch\s+channel\s+to|switch\s+over\s+to)\s+(\w+)\b"
+    ]
+    for pattern in switch_patterns:
+        match = re.search(pattern, msg_clean)
+        if match:
+            target = match.group(1)
+            # Check if target is a name
+            if target in names_map:
+                return names_map[target]
+            # Check if target is a keyword
+            if target in switch_keywords:
+                return switch_keywords[target]
                 
     return None
+
+
+def format_natural_warning(warnings: list[str]) -> str:
+    if not warnings:
+        return "This action requires your confirmation. Shall I proceed?"
+    
+    cleaned = []
+    for w in warnings:
+        w_lower = w.lower()
+        if "interacts with external service" in w_lower:
+            import re
+            m = re.search(r"service\s*\(([^)]+)\)", w, re.IGNORECASE)
+            if m:
+                cleaned.append(f"accessing {m.group(1)}")
+            else:
+                cleaned.append("accessing external services")
+        elif "high estimated duration" in w_lower:
+            cleaned.append("taking a bit longer to execute")
+        elif "risk level is set" in w_lower:
+            continue
+        else:
+            cleaned.append(w.strip(".").lower())
+            
+    if not cleaned:
+        return "This action has potential side effects. Shall I proceed?"
+        
+    if len(cleaned) == 1:
+        warn_text = cleaned[0]
+    elif len(cleaned) == 2:
+        warn_text = f"{cleaned[0]} and {cleaned[1]}"
+    else:
+        warn_text = ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+        
+    return f"Just a heads up: this involves {warn_text}. Shall I proceed?"
 
 
 def detect_delegation(user_message: str) -> Optional[tuple[str, str, str]]:
@@ -330,7 +416,12 @@ class Orchestrator:
                 "elapsed_ms": round(elapsed_ms)
             }
 
-        if ("conference" in msg_clean or "meeting" in msg_clean) :
+        import re
+        is_meeting_start = (
+            any(kw in msg_clean for kw in {"start meeting", "start conference", "join meeting", "join conference", "initiate meeting", "call meeting"}) or
+            (any(kw in msg_clean for kw in {"conference", "meeting"}) and any(verb in msg_clean for verb in {"start", "call", "join", "initiate", "run", "host", "setup"}))
+        )
+        if is_meeting_start:
             import asyncio
             import random
             logger.info("Super-fast-path: Initiating Conference Call")
@@ -386,9 +477,31 @@ class Orchestrator:
             if not active_list:
                 active_list = all_agent_names
                 
+            # Randomize Jarvis intro and outros
+            jarvis_intros = [
+                f"Attention coworkers, I've opened a unified secure link for this session. We have {gender} here with us. Let's do a quick round-table update. {active_list[0]}, go ahead first.",
+                f"Greetings team, {gender} has initiated a collaborative sync. Let's run through our active statuses. {active_list[0]}, would you kick us off?",
+                f"Linking all coworker systems now. {gender} is on the line. Let's verify our current coordinates. {active_list[0]}, please report first."
+            ]
+            
+            jarvis_outros = [
+                f"Superb synchronization, everyone. All active services are calibrated and running in optimal harmony. {gender}, the floor is yours for directions.",
+                f"Excellent alignment, team. The neural paths look stable and completely optimized. {gender}, we're ready for your command.",
+                f"Update cycle complete. All subsystems are synchronized and active. Over to you, {gender}.",
+                f"That wraps up our status round-table. All systems are locked and aligned. Please take the floor, {gender}.",
+                f"Every agent has checked in, and core metrics look extremely stable. Whenever you are ready, {gender}, what are your directives?",
+                f"And that is the full roster update. Systems are verified and running hot. The mic is yours, {gender}.",
+                f"All channels are clear, and coworkers have reported in. {gender}, we are standing by. What's our next move?",
+                f"Rollcall complete. Core modules are humming nicely. Over to you to lead the way, {gender}.",
+                f"We've verified all active components and resources. Everything is synced up. What would you like to prioritize next, {gender}?",
+                f"Outstanding check-in. The pipeline is running at peak calibration. Handing the turn over to you, {gender}.",
+                f"That's all agent updates recorded for this session. Core status is green. Whenever you're ready, {gender}, we're listening.",
+                f"All systems are green and agents are standing by. Over to you, {gender}, to steer our focus."
+            ]
+
             # Build turns dynamically
             conference_turns = [
-                ("Jarvis", f"Attention coworkers, I've opened a unified secure link for this session. We have {gender} here with us. Let's do a quick round-table updates on the system redesign. {active_list[0]}, go ahead first.")
+                ("Jarvis", random.choice(jarvis_intros))
             ]
             
             for i, name in enumerate(active_list):
@@ -397,7 +510,7 @@ class Orchestrator:
                 speech_text += f" Next up: {next_agent}."
                 conference_turns.append((name, speech_text))
                 
-            conference_turns.append(("Jarvis", f"Superb synchronization, everyone. All active services are calibrated and running in optimal harmony. {gender}, the floor is yours for directions."))
+            conference_turns.append(("Jarvis", random.choice(jarvis_outros)))
             
             for agent_name, text in conference_turns:
                 await emit(session_id, "final_response", content=text, agent=agent_name)
@@ -780,11 +893,14 @@ class Orchestrator:
                     }
                     
                     # Generate a quick response confirming execution
+                    is_simulated = res_tool.get("metadata", {}).get("simulated", False)
                     if is_specific_file:
                         res_data = res_tool.get("data") or {}
                         stdout_str = res_data.get("stdout", "") if isinstance(res_data, dict) else ""
                         
-                        if "SUCCESS: Opened " in stdout_str:
+                        if is_simulated:
+                            response_text = f"Done, sir! I've successfully located and opened the simulated file matching **{final_query}** for you. (Note: OS commands are sandboxed in public demo mode)"
+                        elif "SUCCESS: Opened " in stdout_str:
                             opened_path = stdout_str.split("SUCCESS: Opened ")[1].strip()
                             file_basename = os.path.basename(opened_path)
                             response_text = f"Done, sir! I've successfully located and opened **{file_basename}** for you."
@@ -792,7 +908,9 @@ class Orchestrator:
                             response_text = f"I searched your Desktop, Documents, Downloads, and workspace, but could not find a file matching **{final_query}**."
                     else:
                         response_text = f"Done, sir! I've successfully opened the {display_name} for you."
-                        if not res_tool.get("success", False):
+                        if is_simulated:
+                            response_text += " (Note: OS commands are sandboxed in public demo mode)"
+                        elif not res_tool.get("success", False):
                             response_text = f"I tried to launch the {display_name}, but encountered an error: {res_tool.get('error', 'Execution failed')}"
                     
                     elapsed_ms = (time.monotonic() - start_time) * 1000
@@ -873,9 +991,8 @@ class Orchestrator:
                 
                 if not sim_result.get("safe") and not is_plan_read_only(plan):
                     # Conflict or invalid parameter detected
-                    warnings_str = ", ".join(sim_result.get("warnings", []))
-                    msg = f"I must warn you that: {warnings_str}. Shall I proceed anyway?"
-                    await emit(session_id, "confirmation_required", message=msg, risk_level="high")
+                    msg = format_natural_warning(sim_result.get("warnings", []))
+                    await emit(session_id, "confirmation_required", message=msg, risk_level="high", agent=active_agent_name)
                     await short_term_memory.append_message(session_id, "user", user_message)
                     await short_term_memory.append_message(session_id, "assistant", msg)
                     plan["original_user_message"] = user_message
@@ -890,7 +1007,7 @@ class Orchestrator:
                     execution_result = await self.executor.process(enriched_context, session_id)
                 elif plan:
                     msg = str(plan.get("confirmation_message") or "This action requires your confirmation. Shall I proceed?")
-                    await emit(session_id, "confirmation_required", message=msg)
+                    await emit(session_id, "confirmation_required", message=msg, agent=active_agent_name)
                     await short_term_memory.append_message(session_id, "user", user_message)
                     await short_term_memory.append_message(session_id, "assistant", msg)
                     plan["original_user_message"] = user_message

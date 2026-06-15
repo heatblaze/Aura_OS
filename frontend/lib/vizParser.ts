@@ -190,13 +190,27 @@ export function parseVizHint(hint: any, agent: string): VizData | null {
     return null;
   }
 }
+ 
+// ── Visual description parser ─────────────────────────────────
+function parseVisualDescription(text: string, agent: string): VizData | null {
+  // Matches (Visual description: ...) or [Visual description: ...] or (Visual: ...) or [Visual: ...]
+  const match = text.match(/[\(\[](?:Visual\s+description|Visual|Visual\s+Representation)\s*:\s*([^\]\)]+)[\)\]]/i);
+  if (!match) return null;
+
+  return {
+    type: "info",
+    agent,
+    title: "Visual Display",
+    code: match[1].trim(),
+  };
+}
 
 // ── AGENTS that produce visual data by default ──────────────
 const VIZ_AGENTS = new Set(["marcus", "lex", "mia", "elena", "bobby"]);
 
 // ── Main export ───────────────────────────────────────────────
 export function parseVisualContent(text: string, agent: string): VizData | null {
-  if (!text || text.length < 60) return null;
+  if (!text || text.length < 30) return null; // lowered limit to allow shorter visual descriptions
 
   // 1. Fenced JSON block (most explicit)
   const fromJson = parseFencedJson(text, agent);
@@ -215,6 +229,10 @@ export function parseVisualContent(text: string, agent: string): VizData | null 
   // 4. Numbered comparison list
   const fromNum = parseNumberedComparison(text, agent);
   if (fromNum) return fromNum;
+
+  // 5. Visual description fallback
+  const fromDesc = parseVisualDescription(text, agent);
+  if (fromDesc) return fromDesc;
 
   return null;
 }

@@ -525,10 +525,6 @@ export function AuraOrb({ state, amplitude = 0.5, size = 300, width = 300, cowor
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, height);
 
     // ── 1. Update Time & Coworker Theme Morphing ──
@@ -1128,6 +1124,19 @@ export function AuraOrb({ state, amplitude = 0.5, size = 300, width = 300, cowor
 
     frameRef.current = requestAnimationFrame(draw);
   }, [width, height, state, amplitude, coworker]);
+
+  // Resize canvas only when dimensions change
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.scale(dpr, dpr);
+    }
+  }, [width, height]);
 
   useEffect(() => {
     frameRef.current = requestAnimationFrame(draw);

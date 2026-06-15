@@ -316,7 +316,31 @@ async def system_stats():
 
     # Vector bank size (Node count)
     mem_stats = knowledge_memory.get_stats()
-    node_count = mem_stats.get("total_nodes", 0)
+    node_count = mem_stats.get("doc_count", 0)
+
+    # Calculate live size of local fallback DB files & memory stores
+    import os
+    total_bytes = 0
+    ltm_path = os.path.join("backend", "brain", "jarvis_ltm.json")
+    if os.path.exists(ltm_path):
+        total_bytes += os.path.getsize(ltm_path)
+    if not knowledge_memory._available:
+        try:
+            fallback_str = json.dumps(knowledge_memory._fallback)
+            total_bytes += len(fallback_str.encode('utf-8'))
+        except Exception:
+            pass
+    else:
+        total_bytes += node_count * 1024
+
+    if total_bytes < 1024:
+        memory_stream_str = f"{total_bytes} B"
+    elif total_bytes < 1024 * 1024:
+        memory_stream_str = f"{total_bytes / 1024:.2f} KB"
+    elif total_bytes < 1024 * 1024 * 1024:
+        memory_stream_str = f"{total_bytes / (1024 * 1024):.2f} MB"
+    else:
+        memory_stream_str = f"{total_bytes / (1024 * 1024 * 1024):.2f} GB"
 
     # Convert uptime to readable string (e.g. 42d 12h 04m)
     days, remainder = divmod(uptime_seconds, 86400)
@@ -418,7 +442,8 @@ async def system_stats():
         "latency_ms": round(random.uniform(20.0, 50.0)),
         "system_health": round(94.5 - (neural_load_pct - 20) * 0.1, 1),
         "neural_sync": round(98.8 if is_ollama_available else 45.2, 1),
-        "memory_stream_tb": round(2.34 + node_count * 0.02, 2),
+        "memory_stream_tb": round(total_bytes / (1024 * 1024 * 1024 * 1024), 8),
+        "memory_stream": memory_stream_str,
         "resources": {
             "cpu": cpu_pct,
             "ram": ram_pct,
@@ -853,9 +878,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, gender: str 
                 user_id = data.get("user_id", "default_user")
                 channel = data.get("channel", "general")
                 client_gender = data.get("gender")
+                client_tz = data.get("timezone")
                 
                 if client_gender in ["sir", "ma'am"]:
                     await short_term_memory.set(session_id, "gender", client_gender)
+                if client_tz:
+                    await short_term_memory.set(session_id, "timezone", client_tz)
 
                 if not user_message:
                     continue
