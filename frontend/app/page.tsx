@@ -1360,8 +1360,8 @@ export default function JarvisPage() {
                   border: "1px solid rgba(255, 255, 255, 0.05)",
                   borderRadius: 20,
                   padding: "8px 12px",
-                  width: isMobile ? "calc(100% - 32px)" : "fit-content",
-                  maxWidth: "100%",
+                  width: "100%",
+                  maxWidth: isMobile ? "calc(100% - 32px)" : "760px",
                   overflowX: "auto",
                   boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.2)",
                 }}
