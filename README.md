@@ -121,5 +121,5 @@ npm run dev
 ---
 
 <p align="center">
-  Built with ❤️ by the Aura Development Team
+  Built with ❤️
 </p>
