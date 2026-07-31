@@ -19,7 +19,7 @@
 
 ## 🌌 The Vision
 
-**Aura OS** is not just another wrapper for an LLM. It is a real-time, multi-agent autonomous system designed to operate your digital life. Built with a sophisticated **5-Agent Core**, Aura transitions from reactive chat interactions to proactive initiative, anticipating user needs and executing complex workflows across multiple tools.
+**Aura OS** is not just another wrapper for an LLM. It is a real-time, multi-agent autonomous system designed to operate your digital life. Built with a sophisticated **8-Agent Core**, Aura transitions from reactive chat interactions to proactive initiative, anticipating user needs and executing complex workflows across multiple tools.
 
 ## 🧠 Core Architecture
 
@@ -35,7 +35,7 @@ graph TD
     CR --> ME[Neural Memory]
     ME --> UI
     
-    subgraph "The 5 Agents"
+    subgraph "The 8 Agents"
         CM
         PL
         EX
