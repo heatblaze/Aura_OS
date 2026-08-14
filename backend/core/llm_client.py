@@ -10,7 +10,7 @@ from backend.core.message_bus import emit
 logger = structlog.get_logger(__name__)
 
 # ContextVar to override the model for the current task/request (e.g. for low-latency voice command processing)
-current_model_override = contextvars.ContextVar("current_model_override", default=None)
+current_model_override: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_model_override", default=None)
 
 class LLMClient:
     def __init__(self):
@@ -40,7 +40,7 @@ class LLMClient:
             logger.info("Routing prompt to Groq Cloud", agent=agent_name)
             # Default Groq model (can be overridden by ContextVar for voice commands)
             override = current_model_override.get()
-            model = override or settings.GROQ_MODEL or "llama3-8b-8192"
+            model = override or settings.GROQ_MODEL or "openai/gpt-oss-20b"
             
             headers = {
                 "Authorization": f"Bearer {settings.GROQ_API_KEY}",
@@ -52,7 +52,7 @@ class LLMClient:
             current_model = model
 
             for attempt in range(max_retries + 1):
-                payload = {
+                payload: Dict[str, Any] = {
                     "model": current_model,
                     "messages": messages,
                     "temperature": temperature,
@@ -70,10 +70,10 @@ class LLMClient:
                             retry_after = response.headers.get("Retry-After")
                             wait_time = float(retry_after) if retry_after and retry_after.replace('.', '', 1).isdigit() else backoff_delay
                             
-                            # 429 Fallback strategy: if using 70B, immediately switch to 8B instant model
-                            if "70b" in current_model.lower():
-                                logger.warning("Groq 429 Rate Limit on 70B model. Downgrading to llama-3.1-8b-instant...", attempt=attempt)
-                                current_model = "llama-3.1-8b-instant"
+                            # 429 Fallback strategy: if using 70B/120B, immediately switch to openai/gpt-oss-20b
+                            if "70b" in current_model.lower() or "120b" in current_model.lower():
+                                logger.warning("Groq 429 Rate Limit on large model. Downgrading to openai/gpt-oss-20b...", attempt=attempt)
+                                current_model = "openai/gpt-oss-20b"
                                 continue  # retry immediately with the fast model
                             
                             if attempt < max_retries:
@@ -122,7 +122,7 @@ class LLMClient:
                 "Content-Type": "application/json"
             }
             
-            payload = {
+            payload: Dict[str, Any] = {
                 "model": nvidia_model,
                 "messages": messages,
                 "temperature": temperature,

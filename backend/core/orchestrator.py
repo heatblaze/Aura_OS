@@ -31,6 +31,7 @@ from backend.core.intent_engine import intent_engine
 from backend.core.tool_registry import tool_registry
 from backend.core.message_bus import emit
 from backend.memory.short_term import short_term_memory
+from backend.memory.long_term import long_term_memory
 from backend.memory.markdown_brain import markdown_brain
 from backend.execution.simulator import simulation_engine
 
@@ -42,7 +43,8 @@ Generate a clear, helpful, concise response to the user based on the execution r
 Be direct and actionable. Use markdown formatting when helpful.
 If an action was completed, confirm it clearly.
 If something failed, explain why and offer alternatives.
-Do NOT mention internal agent names or system details unless specifically asked."""
+Do NOT mention internal agent names or system details unless specifically asked.
+STRICT GROUNDING RULE: Never invent metrics, client counts, system statistics, or task execution results out of nowhere. Only report verified empirical data derived from actual system commands, tool outputs, or real files."""
 
 DIRECTIVES_PROCESSED = 0
 
@@ -115,7 +117,7 @@ To show the user charts, tables, code blocks, checklists, design metrics, or ric
 When the user explicitly asks you to show details in a "window", "popup", "chart", "table", or "visual panel", you MUST structure the data with one of the above formats so the system can intercept and display it in a draggable popup window!
 """
     else:
-        role_prompt = "You are JARVIS (AURA), an autonomous AI operating system."
+        role_prompt = "You are JARVIS (AURA), an autonomous AI operating system. STRICT GROUNDING RULE: Never invent metrics, client counts, system statistics, or task execution results out of nowhere. Only report verified empirical data derived from actual system commands, tool outputs, or real files."
 
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -145,6 +147,31 @@ COLLABORATIVE CONTEXT (ACTIVE STATUS MEETING):
 - VISUAL DESCRIPTIONS: If you need to present comparative data, logs, costs, tables, or charts, describe the visual elements directly in your response. The system will automatically project a visual mockup panel next to your speech. Always state what you are showing (e.g., "As you can see in the comparison panel on your screen...").
 """
 
+    memory_context_str = ""
+    if session_id:
+        try:
+            recent_msgs = await short_term_memory.get_recent_messages(session_id, n=15)
+            past_actions = await long_term_memory.get_recent_actions(user_id="default_user", limit=10)
+            learned_patterns = await long_term_memory.get_patterns(user_id="default_user")
+
+            history_lines = [f"{m.get('role', 'user')}: {m.get('content', '')}" for m in recent_msgs]
+            action_lines = [f"- {a.get('intent', 'action')}: {a.get('tool_used', 'N/A')} (success={a.get('success')})" for a in past_actions]
+            pattern_lines = [f"- {p.get('key')}: {p.get('value')}" for p in learned_patterns]
+
+            memory_context_str = f"""
+PERSISTENT SESSION & LONG-TERM MEMORY (HYDRATED FOR INSTANT TURN-1 RECALL):
+Recent Conversation History:
+{chr(10).join(history_lines) if history_lines else 'No prior messages in session.'}
+
+Recent User Action Log:
+{chr(10).join(action_lines) if action_lines else 'No recent action logs.'}
+
+Learned Patterns & User Preferences:
+{chr(10).join(pattern_lines) if pattern_lines else 'No learned user patterns.'}
+"""
+        except Exception as mem_err:
+            logger.warning("Failed to hydrate memory in system prompt", error=str(mem_err))
+
     return f"""{role_prompt}
  
 {self_ref_instruction}
@@ -152,6 +179,8 @@ COLLABORATIVE CONTEXT (ACTIVE STATUS MEETING):
 {COWORKER_DIRECTORY}
 
 {CONFERENCE_CONTEXT_PROMPT}
+
+{memory_context_str}
  
 Active System Status:
 - Configured / Active Tools: {configured_tools}
@@ -206,15 +235,7 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
         "mia": "#product-roadmap"
     }
     
-    import re
-    # Check for standalone coworker name mention
-    for name, channel in names_map.items():
-        if channel == current_channel:
-            continue
-        if re.search(rf"\b{name}\b", msg_clean):
-            return channel
-            
-    # Also support explicit channel/area keywords ONLY if preceded by switch commands
+    # Keyword to channel mapping
     switch_keywords = {
         "support": "#support-tickets",
         "growth": "#business-operations",
@@ -231,20 +252,19 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
         "planner": "#product-roadmap",
         "plan": "#product-roadmap"
     }
-    
-    # Check if there is an explicit switch instruction
+
+    import re
+    # Only switch channel if user explicitly requests to switch/talk/go to another agent or channel
     switch_patterns = [
-        r"\b(?:switch to|switch with|go to|talk to|speak with|ask|tell)\s+(\w+)\b",
-        r"\b(?:switch\s+channel\s+to|switch\s+over\s+to)\s+(\w+)\b"
+        r"\b(?:switch to|switch with|go to|talk to|speak with|open|take me to|switch channel to|switch over to)\s+(\w+)\b",
+        r"\b(?:can i talk to|can i speak with|let me talk to|let me speak with)\s+(\w+)\b"
     ]
     for pattern in switch_patterns:
         match = re.search(pattern, msg_clean)
         if match:
             target = match.group(1)
-            # Check if target is a name
             if target in names_map:
                 return names_map[target]
-            # Check if target is a keyword
             if target in switch_keywords:
                 return switch_keywords[target]
                 
@@ -773,8 +793,8 @@ class Orchestrator:
         token = None
         if source == "audio":
             from backend.core.llm_client import current_model_override
-            logger.info("Voice command detected: routing to low-latency Groq 8B model override")
-            token = current_model_override.set("llama-3.1-8b-instant")
+            logger.info("Voice command detected: routing to low-latency Groq 20B model override")
+            token = current_model_override.set("openai/gpt-oss-20b")
 
         try:
             print("⏳ Step 0: Loading persistent memory brain context...")
@@ -822,6 +842,7 @@ class Orchestrator:
                 cmd_to_run = None
                 target_clean = str(cmd_target).lower().strip()
                 
+                display_name = "Application"
                 is_specific_file = False
                 final_query = None
                 
@@ -878,24 +899,26 @@ class Orchestrator:
                     await emit(session_id, "step_start", agent="executor", step_id=1, description=f"Launching {display_name}", tool="local_system")
                     
                     tool = tool_registry.get("local_system")
-                    res_tool = await tool.execute({"command": cmd_to_run})
+                    raw_res = await tool.execute({"command": cmd_to_run}) if tool else {"success": False, "error": "Local system tool unavailable"}
+                    res_dict: dict = raw_res if isinstance(raw_res, dict) else {"success": bool(raw_res), "data": str(raw_res)}
                     
                     execution_result = {
                         "results": [{
                             "step_id": 1,
                             "description": f"Launch {display_name}",
                             "tool": "local_system",
-                            "success": res_tool.get("success", False),
-                            "result": res_tool
+                            "success": res_dict.get("success", False),
+                            "result": res_dict
                         }],
-                        "all_success": res_tool.get("success", False),
+                        "all_success": res_dict.get("success", False),
                         "total_steps": 1
                     }
                     
                     # Generate a quick response confirming execution
-                    is_simulated = res_tool.get("metadata", {}).get("simulated", False)
+                    metadata_dict = res_dict.get("metadata") if isinstance(res_dict.get("metadata"), dict) else {}
+                    is_simulated = metadata_dict.get("simulated", False)
                     if is_specific_file:
-                        res_data = res_tool.get("data") or {}
+                        res_data = res_dict.get("data") if isinstance(res_dict.get("data"), dict) else {}
                         stdout_str = res_data.get("stdout", "") if isinstance(res_data, dict) else ""
                         
                         if is_simulated:
@@ -910,8 +933,8 @@ class Orchestrator:
                         response_text = f"Done, sir! I've successfully opened the {display_name} for you."
                         if is_simulated:
                             response_text += " (Note: OS commands are sandboxed in public demo mode)"
-                        elif not res_tool.get("success", False):
-                            response_text = f"I tried to launch the {display_name}, but encountered an error: {res_tool.get('error', 'Execution failed')}"
+                        elif not res_dict.get("success", False):
+                            response_text = f"I tried to launch the {display_name}, but encountered an error: {res_dict.get('error', 'Execution failed')}"
                     
                     elapsed_ms = (time.monotonic() - start_time) * 1000
                     await emit(session_id, "final_response", content=response_text, agent=active_agent_name)

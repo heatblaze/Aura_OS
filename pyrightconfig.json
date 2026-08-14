@@ -1,7 +1,13 @@
 {
-  "venvPath": "./backend",
-  "venv": "venv",
-  "include": [
-    "backend"
-  ]
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": [
+        "backend/venv/Lib/site-packages",
+        "backend"
+      ]
+    }
+  ],
+  "venvPath": "backend",
+  "venv": "venv"
 }

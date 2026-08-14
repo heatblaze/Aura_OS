@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Home, LayoutDashboard, Brain } from "lucide-react";
@@ -13,6 +13,25 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [isLandingPage, setIsLandingPage] = useState(false);
+
+  useEffect(() => {
+    const checkLandingPage = () => {
+      if (typeof document !== "undefined") {
+        const el = document.querySelector('[data-landing-page="true"]');
+        setIsLandingPage(!!el);
+      }
+    };
+
+    checkLandingPage();
+    const observer = new MutationObserver(checkLandingPage);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [pathname]);
+
+  if (isLandingPage) {
+    return null;
+  }
 
   return (
     <aside className="panel-sidebar">

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Mic, MicOff, Send, Search, Bell, User, Activity, Database, Globe, Terminal, Zap, Brain, ArrowRight, Volume2, VolumeX, Calendar, Palette, Shield } from "lucide-react";
+import { Mic, MicOff, Send, Search, Bell, User, Activity, Database, Globe, Terminal, Zap, Brain, ArrowRight, Volume2, VolumeX, Calendar, Palette, Shield, Home } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { JarvisWebSocket } from "@/lib/websocket";
 import { ChatMessage, JarvisEvent, AgentLogEntry, SystemStatus, EVENT_LABELS, AGENT_COLORS, AGENT_ICONS, VizData } from "@/lib/types";
@@ -10,6 +10,7 @@ import { AuraOrb, VisualizerState } from "./components/NebulaVisualizer";
 import ConferenceMeetingModal from "./components/ConferenceMeetingModal";
 import VisualDataPanel from "./components/VisualDataPanel";
 import { parseVisualContent, parseVizHint } from "@/lib/vizParser";
+import { LandingPage } from "./components/LandingPage";
 
 // Extend window and global scope to support experimental Web Speech API in TypeScript
 declare global {
@@ -130,169 +131,6 @@ export default function JarvisPage() {
       }
     }
   }, []);
-
-  // Play and control the video organically based on scroll activity (Scroll-velocity speed control)
-  useEffect(() => {
-    if (!showWelcome) return;
-
-    let targetPlaybackRate = 0;
-    let currentPlaybackRate = 0;
-    let animationId: number;
-    let decayTimer: any = null;
-    const video = videoRef.current;
-
-    // Reset video state
-    if (video) {
-      video.currentTime = 0;
-      video.playbackRate = 0;
-      video.pause();
-    }
-
-    const updatePlayback = () => {
-      const vid = videoRef.current;
-      if (vid && vid.duration && !isNaN(vid.duration)) {
-        // Smoothly interpolate playback rate
-        currentPlaybackRate += (targetPlaybackRate - currentPlaybackRate) * 0.15;
-
-        // Clamp to end if playing forward or near the end
-        if (vid.currentTime >= vid.duration - 0.1) {
-          vid.currentTime = vid.duration - 0.1;
-          if (!vid.paused) {
-            vid.pause();
-          }
-          if (currentPlaybackRate > 0) {
-            currentPlaybackRate = 0;
-            targetPlaybackRate = 0;
-          }
-        }
-
-        // Forward scrubbing: Use native GPU-accelerated video playback (silky smooth)
-        if (currentPlaybackRate >= 0.0625) {
-          // Double-check clamp to prevent any play() calls when near the end
-          if (vid.currentTime >= vid.duration - 0.1) {
-            vid.currentTime = vid.duration - 0.1;
-            if (!vid.paused) {
-              vid.pause();
-            }
-            currentPlaybackRate = 0;
-            targetPlaybackRate = 0;
-          } else {
-            if (vid.paused) {
-              vid.play().catch(() => {});
-            }
-            const desiredRate = Math.max(0.0625, Math.min(3.0, currentPlaybackRate));
-            if (Math.abs(vid.playbackRate - desiredRate) > 0.05) {
-              vid.playbackRate = desiredRate;
-            }
-          }
-        }
-        // Backward scrubbing: Use manual frame seeking (reverse is not natively supported)
-        else if (currentPlaybackRate < -0.05) {
-          if (!vid.paused) {
-            vid.pause();
-          }
-          if (!vid.seeking) {
-            vid.currentTime = Math.max(0.0, vid.currentTime + currentPlaybackRate * 0.04);
-          }
-        }
-        // Stopped: Pause the video
-        else {
-          currentPlaybackRate = 0;
-          if (!vid.paused) {
-            vid.pause();
-          }
-        }
-
-        // Keep progress bar updated
-        const progress = vid.currentTime / vid.duration;
-        setVideoProgress(progress);
-
-        if (vid.currentTime >= vid.duration - 0.15) {
-          setWelcomeEnded(true);
-        } else {
-          setWelcomeEnded(false);
-        }
-      }
-      animationId = requestAnimationFrame(updatePlayback);
-    };
-
-    animationId = requestAnimationFrame(updatePlayback);
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      
-      // Reset decay timer on active scroll
-      if (decayTimer) clearTimeout(decayTimer);
-
-      const vid = videoRef.current;
-      if (vid && vid.duration && !isNaN(vid.duration)) {
-        if (e.deltaY > 0) {
-          // Scroll down: increase forward speed only if we haven't reached the end
-          if (vid.currentTime < vid.duration - 0.05) {
-            targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.35);
-          } else {
-            targetPlaybackRate = 0;
-            currentPlaybackRate = 0;
-          }
-        } else {
-          // Scroll up: trigger backward speed
-          targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.35);
-        }
-      }
-
-      // Smoothly decay to zero when scrolling stops
-      decayTimer = setTimeout(() => {
-        targetPlaybackRate = 0;
-      }, 120);
-    };
-
-    let touchStartY = 0;
-    const handleTouchStart = (e: TouchEvent) => {
-      touchStartY = e.touches[0].clientY;
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      // Prevent browser default scroll/bounce behavior on welcome video
-      e.preventDefault();
-      if (decayTimer) clearTimeout(decayTimer);
-
-      const touchY = e.touches[0].clientY;
-      const deltaY = touchStartY - touchY;
-      touchStartY = touchY;
-
-      const vid = videoRef.current;
-      if (vid && vid.duration && !isNaN(vid.duration)) {
-        if (deltaY > 0) {
-          // Swipe up / Scroll down: increase forward speed
-          if (vid.currentTime < vid.duration - 0.1) {
-            targetPlaybackRate = Math.min(2.5, targetPlaybackRate + 0.25);
-          } else {
-            targetPlaybackRate = 0;
-            currentPlaybackRate = 0;
-          }
-        } else if (deltaY < 0) {
-          // Swipe down / Scroll up: trigger backward speed
-          targetPlaybackRate = Math.max(-2.5, targetPlaybackRate - 0.25);
-        }
-      }
-
-      decayTimer = setTimeout(() => {
-        targetPlaybackRate = 0;
-      }, 120);
-    };
-
-    window.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("touchstart", handleTouchStart, { passive: false });
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    return () => {
-      window.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      cancelAnimationFrame(animationId);
-      if (decayTimer) clearTimeout(decayTimer);
-    };
-  }, [showWelcome]);
-
   const handleWelcomeClick = () => {
     if (welcomeEnded) {
       setShowWelcome(false);
@@ -395,7 +233,20 @@ export default function JarvisPage() {
     };
     updateVizSize();
     window.addEventListener("resize", updateVizSize);
-    return () => window.removeEventListener("resize", updateVizSize);
+
+    const handlePopState = (e: PopStateEvent) => {
+      if (e.state?.view === "app" || window.location.hash === "#app") {
+        setShowWelcome(false);
+      } else {
+        setShowWelcome(true);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("resize", updateVizSize);
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, []);
 
   // Derived responsive layout values
@@ -1103,115 +954,43 @@ export default function JarvisPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", position: "relative" }}>
 
-      {/* ── Welcome Video Screen (Scroll controlled) ── */}
+      {/* ── Landing Page Overlay ── */}
       <AnimatePresence>
         {showWelcome && (
           <motion.div
+            data-landing-page="true"
             initial={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.05 }}
-            transition={{ duration: 0.8, ease: "easeInOut" }}
-            onClick={handleWelcomeClick}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.5, ease: "easeInOut" }}
             style={{
               position: "fixed",
               top: 0,
               left: 0,
               width: "100vw",
               height: "100vh",
-              backgroundColor: "#000",
-              zIndex: 99999,
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              alignItems: "center",
-              overflow: "hidden",
-              cursor: welcomeEnded ? "pointer" : "ns-resize",
+              backgroundColor: "#050814",
+              zIndex: 999999,
+              overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
-            {/* Interactive video tag - full screen cover */}
-            <video
-              ref={videoRef}
-              src={process.env.NEXT_PUBLIC_VIDEO_URL || "/welcome.mp4"}
-              playsInline
-              muted
-              preload="auto"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: isMobile ? "contain" : "cover",
-                pointerEvents: "none"
+            <LandingPage
+              liveStats={liveStats}
+              onLaunchOS={(channelId) => {
+                if (channelId) {
+                  setActiveChannel(channelId);
+                }
+                try {
+                  window.history.pushState({ view: "app" }, "", "#app");
+                } catch {}
+                setShowWelcome(false);
               }}
             />
-
-            {/* Scroll Indicator overlay (shown at start and while scrubbing) */}
-            {!welcomeEnded && (
-              <div style={{
-                position: "absolute",
-                bottom: 50,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 8,
-                color: "rgba(255, 255, 255, 0.6)",
-                fontSize: 12,
-                fontFamily: "var(--font-mono, monospace)",
-                textTransform: "uppercase",
-                letterSpacing: "0.15em",
-                pointerEvents: "none",
-                textShadow: "0 0 10px rgba(0,0,0,0.8)"
-              }}>
-                <motion.div
-                  animate={{ y: [0, 6, 0] }}
-                  transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
-                  style={{ fontSize: 18 }}
-                >
-                  ↓
-                </motion.div>
-                <span>Scroll down to initialize core</span>
-                {/* Visual scrub bar */}
-                <div style={{ width: 120, height: 2, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 1, marginTop: 4, position: "relative" }}>
-                  <div style={{ position: "absolute", top: 0, left: 0, height: "100%", width: `${videoProgress * 100}%`, backgroundColor: "var(--accent-cyan)", boxShadow: "0 0 8px var(--accent-cyan)", transition: "width 0.1s ease" }} />
-                </div>
-              </div>
-            )}
-
-            {/* End Call to Action overlay */}
-            <AnimatePresence>
-              {welcomeEnded && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5 }}
-                  style={{
-                    position: "absolute",
-                    bottom: 80,
-                    padding: "12px 28px",
-                    borderRadius: 30,
-                    background: "rgba(0, 212, 255, 0.08)",
-                    border: "1px solid rgba(0, 212, 255, 0.3)",
-                    boxShadow: "0 0 20px rgba(0, 212, 255, 0.15), inset 0 0 10px rgba(0, 212, 255, 0.05)",
-                    backdropFilter: "blur(12px)",
-                    color: "#fff",
-                    fontFamily: "var(--font-mono, monospace)",
-                    fontSize: 13,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.2em",
-                    pointerEvents: "none",
-                    textAlign: "center"
-                  }}
-                >
-                  <motion.span
-                    animate={{ opacity: [0.5, 1, 0.5] }}
-                    transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
-                  >
-                    Click anywhere to enter Aura OS
-                  </motion.span>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
+
+
 
       {/* ── Conference Meeting Modal ── */}
       <ConferenceMeetingModal
