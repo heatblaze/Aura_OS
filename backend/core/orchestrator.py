@@ -1115,7 +1115,6 @@ class Orchestrator:
             print("-"*80, flush=True)
             print(f"❌ PIPELINE EXCEPTION: {e}", flush=True)
             print("="*80 + "\n", flush=True)
-            import sys
             sys.stdout.flush()
             fallback_msg = f"I've checked on your request. {active_agent_name or 'The team'} is active and synchronized across all channels. No urgent pending tasks require your immediate attention right now."
             await emit(session_id, "final_response", content=fallback_msg, agent=active_agent_name)
