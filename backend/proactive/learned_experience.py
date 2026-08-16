@@ -72,19 +72,13 @@ class LearnedExperienceCompiler(BaseAgent):
             await asyncio.sleep(300)
 
     async def compile_experiences(self):
-        logger.info("Running KRONOS learned experience scan...")
-        
         # 1. Fetch recent actions from PostgreSQL LTM
         recent = await long_term_memory.get_recent_actions(user_id="default_user", limit=15)
         
         if not recent:
-            # Fallback placeholder actions if DB has no records (e.g. offline fallback)
-            # This ensures AURA can demonstrate the KRONOS graph even during development
-            recent = [
-                {"intent": "web_search", "tool_used": "web_search", "success": True, "created_at": datetime.now().isoformat()},
-                {"intent": "system_diagnostics", "tool_used": "local_system", "success": True, "created_at": datetime.now().isoformat()},
-                {"intent": "check_gmail", "tool_used": "gmail", "success": False, "created_at": datetime.now().isoformat()}
-            ]
+            # Skip background compilation when no action logs exist to conserve Groq API tokens
+            logger.debug("Skipping KRONOS memory compilation — no action logs found.")
+            return
             
         # 2. Format actions
         actions_str = ""

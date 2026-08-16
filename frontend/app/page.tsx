@@ -443,21 +443,21 @@ export default function JarvisPage() {
   }, []);
 
   const speakText = React.useCallback((text: string, agentName: string = "Jarvis", channel: string, alreadyDisplayed: boolean = false, vizData: VizData | null = null) => {
+    // ALWAYS display the message in the UI chat list immediately so the response is visible
+    if (!alreadyDisplayed) {
+      setActiveChannel(channel);
+      addMessage(channel, "assistant", text);
+    }
+    if (vizData) {
+      setVizPanelData(vizData);
+    }
+
     if (!isVoiceEnabledRef.current) {
-      if (!alreadyDisplayed) {
-        setActiveChannel(channel);
-        addMessage(channel, "assistant", text);
-      }
-      if (vizData) {
-        setVizPanelData(vizData);
-      }
       return;
     }
 
-    speechQueueRef.current.push({ text, agentName, channel, alreadyDisplayed, vizData });
-    if (userInteractedRef.current) {
-      processSpeechQueue();
-    }
+    speechQueueRef.current.push({ text, agentName, channel, alreadyDisplayed: true, vizData });
+    processSpeechQueue();
   }, [addMessage, setActiveChannel]);
 
   const wsRef = useRef<JarvisWebSocket | null>(null);

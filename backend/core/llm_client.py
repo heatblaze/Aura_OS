@@ -41,6 +41,9 @@ class LLMClient:
             # Default Groq model (can be overridden by ContextVar for voice commands)
             override = current_model_override.get()
             model = override or settings.GROQ_MODEL or "openai/gpt-oss-20b"
+            # Intercept deprecated Llama 3.1 8b models and replace with openai/gpt-oss-20b
+            if not model or "llama-3.1-8b" in model.lower() or "llama3.1" in model.lower():
+                model = "openai/gpt-oss-20b"
             
             headers = {
                 "Authorization": f"Bearer {settings.GROQ_API_KEY}",

@@ -5,6 +5,14 @@ Stores learned workflows, user-relevant info, and past action summaries.
 from typing import Optional
 import structlog
 
+# NumPy 2.0 compatibility shim for ChromaDB
+try:
+    import numpy as np
+    if not hasattr(np, "float_"):
+        np.float_ = np.float64
+except Exception:
+    pass
+
 logger = structlog.get_logger(__name__)
 
 
