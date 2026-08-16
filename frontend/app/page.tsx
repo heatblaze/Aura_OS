@@ -977,6 +977,8 @@ export default function JarvisPage() {
             <LandingPage
               liveStats={liveStats}
               onLaunchOS={(channelId) => {
+                userInteractedRef.current = true;
+                const targetCh = channelId || activeChannel || "#general-chat";
                 if (channelId) {
                   setActiveChannel(channelId);
                 }
@@ -984,6 +986,13 @@ export default function JarvisPage() {
                   window.history.pushState({ view: "app" }, "", "#app");
                 } catch {}
                 setShowWelcome(false);
+                // Trigger initial audio greeting on Launch OS click
+                speakText(
+                  `Welcome back, ${detectedGender === "sir" ? "Sir" : "Ma'am"}. Aura OS is online and adaptive.`,
+                  "Jarvis",
+                  targetCh,
+                  true
+                );
               }}
             />
           </motion.div>
