@@ -550,13 +550,14 @@ class Orchestrator:
             }
 
         if not is_proactive:
-            print("\n" + "="*80)
-            print("⚡ AURA DIRECTIVE RECEIVED")
-            print(f"• Coworker:   {active_agent_name}")
-            print(f"• Input Type: {source.upper()}")
-            print(f"• Command:    \"{user_message}\"")
-            print(f"• Transit Time (UI -> Sockets): {transit_duration_ms:.2f} ms")
-            print("-"*80)
+            print("\n" + "="*80, flush=True)
+            print("⚡ AURA DIRECTIVE RECEIVED", flush=True)
+            print(f"• Coworker:   {active_agent_name}", flush=True)
+            print(f"• Input Type: {source.upper()}", flush=True)
+            print(f"• Command:    \"{user_message}\"", flush=True)
+            print(f"• Transit Time (UI -> Sockets): {transit_duration_ms:.2f} ms", flush=True)
+            print("-"*80, flush=True)
+            sys.stdout.flush()
 
         # Check if there is a pending confirmation plan for this session
         pending_plan = await short_term_memory.get(session_id, "pending_plan")
@@ -1090,13 +1091,14 @@ class Orchestrator:
                        elapsed_ms=round(elapsed_ms),
                        response_preview=response_text[:100])
 
-            print("-"*80)
-            print("✅ PIPELINE EXECUTION SUMMARY")
-            print(f"• Coworker:             {active_agent_name}")
-            print(f"• UI-to-Socket Transit:  {transit_duration_ms:.2f} ms")
-            print(f"• Backend Processing:    {elapsed_ms:.2f} ms")
-            print(f"• Total Direct Duration: {transit_duration_ms + elapsed_ms:.2f} ms")
-            print("="*80 + "\n")
+            print("-"*80, flush=True)
+            print("✅ PIPELINE EXECUTION SUMMARY", flush=True)
+            print(f"• Coworker:             {active_agent_name}", flush=True)
+            print(f"• UI-to-Socket Transit:  {transit_duration_ms:.2f} ms", flush=True)
+            print(f"• Backend Processing:    {elapsed_ms:.2f} ms", flush=True)
+            print(f"• Total Direct Duration: {transit_duration_ms + elapsed_ms:.2f} ms", flush=True)
+            print("="*80 + "\n", flush=True)
+            sys.stdout.flush()
 
             return {
                 "response": response_text,

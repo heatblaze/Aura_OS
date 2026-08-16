@@ -32,34 +32,36 @@ class KnowledgeMemory:
         try:
             import chromadb
             from backend.config.settings import settings
-            import asyncio
+            import os
 
-            max_retries = 5
-            retry_delay = 2.0
+            # 1. Try connecting to external HTTP ChromaDB server (1 quick attempt)
+            try:
+                self._client = chromadb.HttpClient(
+                    host=settings.CHROMA_HOST,
+                    port=settings.CHROMA_PORT,
+                )
+                self._client.heartbeat()
+                self._collection = self._client.get_or_create_collection(
+                    name=settings.CHROMA_COLLECTION,
+                    metadata={"hnsw:space": "cosine"},
+                )
+                self._available = True
+                logger.info("KnowledgeMemory connected to ChromaDB HTTP Server")
+                return
+            except Exception:
+                pass
 
-            for attempt in range(1, max_retries + 1):
-                try:
-                    self._client = chromadb.HttpClient(
-                        host=settings.CHROMA_HOST,
-                        port=settings.CHROMA_PORT,
-                    )
-                    self._client.heartbeat()
-                    self._collection = self._client.get_or_create_collection(
-                        name=settings.CHROMA_COLLECTION,
-                        metadata={"hnsw:space": "cosine"},
-                    )
-                    self._available = True
-                    logger.info("KnowledgeMemory connected to ChromaDB")
-                    return
-                except Exception as attempt_err:
-                    if attempt < max_retries:
-                        logger.warning(
-                            f"ChromaDB connection attempt {attempt}/{max_retries} failed. Retrying in {retry_delay}s...",
-                            error=str(attempt_err)
-                        )
-                        await asyncio.sleep(retry_delay)
-                    else:
-                        raise attempt_err
+            # 2. Embedded ChromaDB fallback (runs in-process with local disk persistence)
+            chroma_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain", "chroma_db")
+            os.makedirs(chroma_dir, exist_ok=True)
+            self._client = chromadb.PersistentClient(path=chroma_dir)
+            self._collection = self._client.get_or_create_collection(
+                name=settings.CHROMA_COLLECTION,
+                metadata={"hnsw:space": "cosine"},
+            )
+            self._available = True
+            logger.info("KnowledgeMemory active using Embedded Local ChromaDB", path=chroma_dir)
+            return
         except Exception as e:
             logger.warning("ChromaDB unavailable, using list fallback", error=str(e))
             self._available = False
