@@ -331,6 +331,17 @@ export default function JarvisPage() {
       return;
     }
 
+    // Ensure no overlapping audio streams by stopping active audio and speech synthesis
+    try {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        currentAudioRef.current = null;
+      }
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+
     const voiceMap: Record<string, string> = {
       "jarvis": "21m00Tcm4TlvDq8ikWAM",  // Rachel -> en-US-AriaNeural
       "bobby": "86ZLAUcyPNBrbdJKn3u6",   // Growth -> en-US-ChristopherNeural
@@ -387,7 +398,7 @@ export default function JarvisPage() {
         }
       }
     } catch (err) {
-      console.warn("ElevenLabs synthesis fallback to WebSpeech due to:", err);
+      console.warn("TTS synthesis fallback to WebSpeech due to:", err);
     }
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
