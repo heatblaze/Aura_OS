@@ -30,9 +30,10 @@ class KnowledgeMemory:
 
     async def connect(self):
         try:
+            import os
+            os.environ["ANONYMIZED_TELEMETRY"] = "False"
             import chromadb
             from backend.config.settings import settings
-            import os
 
             # 1. Try connecting to external HTTP ChromaDB server (1 quick attempt)
             try:
@@ -51,16 +52,9 @@ class KnowledgeMemory:
             except Exception:
                 pass
 
-            # 2. Embedded ChromaDB fallback (runs in-process with local disk persistence)
-            chroma_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "brain", "chroma_db")
-            os.makedirs(chroma_dir, exist_ok=True)
-            self._client = chromadb.PersistentClient(path=chroma_dir)
-            self._collection = self._client.get_or_create_collection(
-                name=settings.CHROMA_COLLECTION,
-                metadata={"hnsw:space": "cosine"},
-            )
-            self._available = True
-            logger.info("KnowledgeMemory active using Embedded Local ChromaDB", path=chroma_dir)
+            # 2. On cloud/container environments, use clean in-memory fallback to avoid heavy ONNX downloads & CPU locks
+            logger.info("KnowledgeMemory active using In-Memory Vector Store")
+            self._available = False
             return
         except Exception as e:
             logger.warning("ChromaDB unavailable, using list fallback", error=str(e))

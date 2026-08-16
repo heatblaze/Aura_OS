@@ -81,7 +81,7 @@ class BaseAgent(ABC):
             f"Previous response: {raw[:500]}\n"
             f"Please respond ONLY with valid JSON, no explanation."
         )
-        raw2 = await self.think(fix_prompt, session_id=session_id, expect_json=True)
+        raw2 = await self.think(fix_prompt, system_prompt=system_prompt, session_id=session_id, expect_json=True)
         parsed2 = self._extract_json(raw2)
         if parsed2 is not None:
             return parsed2
