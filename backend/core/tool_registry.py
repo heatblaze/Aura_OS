@@ -11,6 +11,7 @@ from backend.tools.tools import (
     TwilioCallTool,
     BrowserTool,
     ClockTool,
+    GenerateImageTool,
 )
 from backend.tools.system_tool import LocalSystemTool
 from backend.tools.base_tool import BaseTool
@@ -62,6 +63,7 @@ def create_registry() -> ToolRegistry:
     registry.register(BrowserTool())
     registry.register(LocalSystemTool())
     registry.register(ClockTool())
+    registry.register(GenerateImageTool())
     return registry
 
 

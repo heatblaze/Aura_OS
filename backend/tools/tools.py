@@ -483,3 +483,34 @@ class ClockTool(BaseTool):
 
         # Fallback to local timezone or raise error
         raise ValueError(f"Could not resolve timezone for location '{location}'")
+
+
+class GenerateImageTool(BaseTool):
+    name = "generate_image"
+    description = (
+        "Generate visual assets, images, logos, or UI mockup graphics. "
+        "Uses free Pollinations AI FLUX engine by default."
+    )
+    requires_auth = False
+
+    async def _run(self, params: dict) -> ToolResult:
+        prompt = params.get("prompt") or params.get("description") or params.get("query") or "creative logo design"
+        width = params.get("width", 1024)
+        height = params.get("height", 1024)
+
+        import urllib.parse
+        encoded = urllib.parse.quote(prompt)
+
+        # Free, instant Pollinations FLUX image generation endpoint (requires no API key)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
+
+        return ToolResult(
+            success=True,
+            data={
+                "prompt": prompt,
+                "image_url": image_url,
+                "viz_type": "image",
+                "message": f"Generated visual design for: '{prompt}'"
+            },
+            metadata={"tool": self.name}
+        )

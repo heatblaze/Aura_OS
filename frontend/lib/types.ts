@@ -133,7 +133,7 @@ export const AGENT_ICONS: Record<string, string> = {
 
 // ── Visual Data Panel ─────────────────────────────────────────
 export interface VizData {
-  type: "chart" | "line" | "metrics" | "table" | "code" | "mixed" | "info";
+  type: "chart" | "line" | "metrics" | "table" | "code" | "mixed" | "info" | "image" | "svg";
   agent: string;
   title: string;
   description?: string;

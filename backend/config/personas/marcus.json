@@ -7,6 +7,7 @@
   "color": "#eab308",
   "icon": "MARCUS",
   "allowed_tools": [
-    "local_system"
+    "local_system",
+    "web_search"
   ]
 }

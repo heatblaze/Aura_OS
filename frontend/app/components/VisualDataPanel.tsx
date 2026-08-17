@@ -202,6 +202,24 @@ function InfoRenderer({ text, color }: { text: string; color: string }) {
   );
 }
 
+function ImageRenderer({ imageUrl, prompt, color }: { imageUrl: string; prompt?: string; color: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center" }}>
+      {prompt && (
+        <p style={{ fontSize: "12px", color: "rgba(255,255,255,0.7)", margin: 0, textAlign: "center", fontStyle: "italic" }}>
+          "{prompt}"
+        </p>
+      )}
+      <div style={{
+        borderRadius: "14px", overflow: "hidden", border: `1px solid rgba(${hexToRgb(color)}, 0.3)`,
+        boxShadow: `0 0 24px rgba(${hexToRgb(color)}, 0.25)`, background: "#000", width: "100%", maxHeight: "380px", display: "flex", justifyContent: "center"
+      }}>
+        <img src={imageUrl} alt={prompt || "Visual Design"} style={{ maxWidth: "100%", maxHeight: "380px", objectFit: "contain" }} />
+      </div>
+    </div>
+  );
+}
+
 function LineChartRenderer({ points, color }: { points: { label: string; value: number }[]; color: string }) {
   if (points.length < 2) return <BarChartRenderer rows={points} color={color} />;
   const max = Math.max(...points.map(p => p.value));
@@ -456,6 +474,9 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
                 )}
                 {data.type === "info" && data.code && (
                   <InfoRenderer text={data.code} color={color} />
+                )}
+                {(data.type === "image" || (data as any).imageUrl) && (
+                  <ImageRenderer imageUrl={(data as any).imageUrl || (data as any).code || ""} prompt={data.title} color={color} />
                 )}
 
                 {/* Mixed: metrics + chart */}

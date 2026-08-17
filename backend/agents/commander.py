@@ -53,8 +53,9 @@ class CommanderAgent(BaseAgent):
             if patterns else "No patterns detected yet."
         )
 
+        user_msg = str(context.get('user_message', '')).replace('"', '\\"')
         prompt = f"""
-User Request: {context.get('user_message', '')}
+User Request: {user_msg}
 
 Extracted Intent: {intent}
 

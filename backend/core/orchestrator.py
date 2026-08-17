@@ -413,14 +413,14 @@ class Orchestrator:
             gender = await short_term_memory.get(session_id, "gender", "sir")
             
             rollcall_steps = [
-                ("Jarvis", f"ARISE Protocol initiated, {gender}. Systems are online. Core orchestrator and cognitive pipeline are fully active. Ready for rollcall."),
-                ("Bobby", f"Bobby present, {gender}! Web intelligence, search indexes, and marketing growth modules are fully calibrated and standing by."),
-                ("Claire", f"Claire here, {gender}. Script processors, system diagnostic logs, and native command automation engines are completely optimized."),
-                ("Sarah", f"Sarah check-in, {gender}. Email triage, calendars, and support ticketing queues are successfully synchronized."),
-                ("Elena", f"Elena reporting, {gender}. Creative assets, UI frameworks, and graphics synthesis components are online."),
-                ("Marcus", f"Marcus online, {gender}. API budget allocation and resource trackers are verified."),
-                ("Lex", f"Lex standing guard, {gender}. Dependency checks and security audit modules are active."),
-                ("Mia", f"Mia checking in, {gender}. Roadmap projections and project planning models are prepared.")
+                ("Jarvis", f"ARISE Protocol initiated, {gender}. Systems are online. I am coordinating all active agents and pipelines. Ready for rollcall."),
+                ("Bobby", f"I am Bobby, {gender}. I've calibrated my market intelligence, competitive analysis, and growth models for you."),
+                ("Claire", f"I am Claire, {gender}. I've optimized my system diagnostic logs, file automation, and command execution engines."),
+                ("Sarah", f"I'm Sarah, {gender}. I have synchronized all email communications, calendars, and support ticketing queues."),
+                ("Elena", f"I am Elena, {gender}. My visual asset generation frameworks, UI design components, and creative tools are online."),
+                ("Marcus", f"I am Marcus, {gender}. I have verified my financial calculation engines, currency tools, and budget trackers."),
+                ("Lex", f"I am Lex, {gender}. I have activated my security audit modules, vulnerability scanners, and key protection checks."),
+                ("Mia", f"I'm Mia, {gender}. I've prepared my product roadmap projections, timeline schedules, and milestone planners.")
             ]
             
             for agent_name, text in rollcall_steps:
@@ -1147,7 +1147,7 @@ class Orchestrator:
                     data_str = str(res_val.get("data", ""))
                 else:
                     data_str = str(res_val or "")
-                results_summary += f"\n✅ {r.get('description', '')}: {data_str[:200]}"
+                results_summary += f"\n✅ {r.get('description', '')}: {data_str[:1500]}"
             else:
                 results_summary += f"\n❌ {r.get('description', '')}: {r.get('error', 'Failed')}"
 

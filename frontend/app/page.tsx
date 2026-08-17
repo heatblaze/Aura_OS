@@ -748,7 +748,6 @@ export default function JarvisPage() {
       if (event.type === "connected" && event.message) {
         // Log welcome message under the general chat channel
         addMessage("#general-chat", "assistant", event.message);
-        speakText(event.message, "Jarvis", "#general-chat", true);
       } else if (event.type === "final_response") {
         // Backend emit() sends content at top level OR inside data — check both
         const ev = event as any;
@@ -1230,12 +1229,37 @@ export default function JarvisPage() {
               {/* ── Command Input Bar ── */}
               <div style={{ width: "100%", maxWidth: 480, margin: "2px auto 0" }}>
                 <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="input-bar" style={{ padding: isWindowed ? "4px 4px 4px 14px" : undefined }}>
-                  <input value={input} onChange={e => {
-                    setInput(e.target.value);
-                    speechTranscriptRef.current = e.target.value;
-                  }} placeholder="Give command to Aura..."
-                    style={{ fontSize: isWindowed ? 12 : undefined }}
-                    disabled={isProcessing} suppressHydrationWarning={true} />
+                  <textarea
+                    value={input}
+                    onChange={e => {
+                      setInput(e.target.value);
+                      speechTranscriptRef.current = e.target.value;
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendMessage();
+                      }
+                    }}
+                    placeholder="Give command to Aura..."
+                    rows={1}
+                    style={{
+                      flex: 1,
+                      background: "transparent",
+                      border: "none",
+                      outline: "none",
+                      color: "var(--text-primary)",
+                      fontFamily: "inherit",
+                      fontSize: isWindowed ? 12 : 14,
+                      resize: "none",
+                      minHeight: "36px",
+                      maxHeight: "110px",
+                      overflowY: "auto",
+                      lineHeight: "1.4",
+                      padding: "8px 0",
+                    }}
+                    suppressHydrationWarning={true}
+                  />
                   <motion.button type="button" whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
                     onClick={handleToggleVoice}
                     suppressHydrationWarning={true}
