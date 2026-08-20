@@ -184,8 +184,9 @@ export function parseVizHint(hint: any, agent: string): VizData | null {
       metrics: hint.data?.metrics,
       headers: hint.data?.headers,
       tableRows: hint.data?.table_rows,
-      code: hint.data?.code,
-    } as VizData;
+      code: hint.data?.code || hint.code,
+      imageUrl: hint.imageUrl || hint.image_url || hint.data?.imageUrl || hint.data?.image_url,
+    } as any as VizData;
   } catch {
     return null;
   }

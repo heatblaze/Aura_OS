@@ -70,18 +70,8 @@ class LLMClient:
                         
                         # Handle 429 Rate Limits
                         if response.status_code == 429:
-                            retry_after = response.headers.get("Retry-After")
-                            wait_time = float(retry_after) if retry_after and retry_after.replace('.', '', 1).isdigit() else backoff_delay
-                            
-                            # 429 Fallback strategy: if using 70B/120B, immediately switch to openai/gpt-oss-20b
-                            if "70b" in current_model.lower() or "120b" in current_model.lower():
-                                logger.warning("Groq 429 Rate Limit on large model. Downgrading to openai/gpt-oss-20b...", attempt=attempt)
-                                current_model = "openai/gpt-oss-20b"
-                                continue  # retry immediately with the fast model
-                            
                             if attempt < max_retries:
-                                logger.warning(f"Groq 429 Rate Limit. Retrying in {wait_time}s...", attempt=attempt)
-                                await asyncio.sleep(wait_time)
+                                await asyncio.sleep(backoff_delay)
                                 backoff_delay *= 2.0
                                 continue
                             else:
@@ -125,14 +115,21 @@ class LLMClient:
                 "Content-Type": "application/json"
             }
             
+            nvidia_messages = copy.deepcopy(messages)
+            if json_mode:
+                if nvidia_messages and nvidia_messages[0].get("role") == "system":
+                    nvidia_messages[0]["content"] += "\nRespond ONLY with valid raw JSON."
+                else:
+                    nvidia_messages.insert(0, {"role": "system", "content": "Respond ONLY with valid raw JSON."})
+
             payload: Dict[str, Any] = {
                 "model": nvidia_model,
-                "messages": messages,
+                "messages": nvidia_messages,
                 "temperature": temperature,
+                "top_p": 0.7,
+                "max_tokens": 1024,
                 "stream": False
             }
-            if json_mode:
-                payload["response_format"] = {"type": "json_object"}
 
             try:
                 async with httpx.AsyncClient() as client:

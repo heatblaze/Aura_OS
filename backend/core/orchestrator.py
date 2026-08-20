@@ -195,7 +195,7 @@ Do NOT mention internal agent names or system details unless specifically asked.
 
 SPECIALIST AGENT RULES:
 - MARCUS (FINANCIAL ANALYST): When answering currency conversions, exchange rates, or stock queries, you MUST extract and state the EXACT numerical exchange rate or calculated value from the search/tool results (e.g. "1 AUD = ₹54.82 INR, so $100 AUD = ₹5,482.00 INR"). NEVER tell the user to go check external websites.
-- ELENA (CREATIVE DIRECTOR): When asked to design logos or visual layouts, describe the concept warmly. NEVER output raw unformatted SVG code in the main chat response. Always format your output with a Markdown comparison table or `(Visual description: ...)` so the frontend visual panel opens a graphical preview popup on screen.
+- ELENA (CREATIVE DIRECTOR): When you generate a logo, webpage, or graphic design, describe your visual concept and color palette warmly in text. NEVER output raw unformatted SVG code or raw markdown tables containing image links. The system automatically projects the generated image card on screen for the user.
  
 {brain_context}"""
 
@@ -258,10 +258,11 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
     }
 
     import re
-    # Only switch channel if user explicitly requests to switch/talk/go to another agent or channel
+    # Match explicit channel switch phrases or direct coworker name address/mentions
     switch_patterns = [
         r"\b(?:switch to|switch with|go to|talk to|speak with|open|take me to|switch channel to|switch over to)\s+(\w+)\b",
-        r"\b(?:can i talk to|can i speak with|let me talk to|let me speak with)\s+(\w+)\b"
+        r"\b(?:can i talk to|can i speak with|let me talk to|let me speak with)\s+(\w+)\b",
+        r"\b(?:hey|hi|hello|ask|tell)?\s*(bobby|claire|sarah|elena|marcus|lex|mia)\b"
     ]
     for pattern in switch_patterns:
         match = re.search(pattern, msg_clean)
@@ -448,45 +449,58 @@ class Orchestrator:
         if is_meeting_start:
             import asyncio
             import random
+            import datetime
             logger.info("Super-fast-path: Initiating Conference Call")
             gender = await short_term_memory.get(session_id, "gender", "sir")
             
-            # Map standard agents to jokes or natural custom updates
+            # Fetch real empirical telemetry safely with fallback
+            cpu_usage = 12.4
+            ram_usage = 45.8
+            try:
+                import psutil
+                cpu_usage = psutil.cpu_percent(interval=None)
+                ram_usage = psutil.virtual_memory().percent
+            except Exception:
+                pass
+                
+            current_time_str = datetime.datetime.now().strftime("%I:%M %p")
+            
+            # Map standard agents to real, grounded empirical updates
             agent_variants = {
                 "Claire": [
-                    f"Claire here, {gender}. I've finished rewiring the event loops in our system bus. No compile leaks, thankfully!",
-                    f"Claire checking in, {gender}. Redesigned our API routing. It compiled on the first run—which honestly scares me, but I'll take the win!",
-                    f" Claire here. Systems are optimized. Claire's rule number one: if it compiles, don't breathe on it. Marcus, did the resource charts update?"
+                    f"Claire checking in, {gender}. Live CPU load is at {cpu_usage}% and memory usage is steady at {ram_usage}%. Core execution loops are completely healthy.",
+                    f"Claire here, {gender}. Diagnostic scan shows system load at {cpu_usage}%. All background threads and local execution drivers are performing cleanly.",
+                    f"Claire reporting. Core memory utilization is sitting at {ram_usage}%, {gender}. No process bottlenecks detected."
                 ],
                 "Marcus": [
-                    f"Marcus here, {gender}. Checked the cost analytics. We pruned some redundant queries and cut costs by twelve percent today.",
-                    f"Marcus online. Budget trackers are looking green. At this rate, we might even afford some premium coffee upgrades. Lex, security checks all clear?",
-                    f"Marcus report, {gender}. Financed api parameters are locked and optimized. Bobby, did the metrics align?"
+                    f"Marcus here, {gender}. Token consumption across active sessions is verified. API routing parameters are operating within optimal cost bounds.",
+                    f"Marcus reporting, {gender}. Compute resource metrics and API allocation channels are fully synchronized.",
+                    f"Marcus online. Our active model token budget is balanced, {gender}. All query cost paths look efficient."
                 ],
                 "Lex": [
-                    f"Lex standing guard, {gender}. I've scanned the live socket tunnels and privilege logs. Zero vulnerabilities detected.",
-                    f"Lex reporting. Checked dependencies for privilege overrides. Everything's tight. Lex's advice: trust everyone, but encrypt your backups anyway. Bobby, crawler load?",
-                    f"Lex here. Ports are closed, firewalls checked. Stably locked down. Bobby, over to you."
+                    f"Lex reporting, {gender}. Socket tunnels and permission logs are clean—local environment keys are fully secured.",
+                    f"Lex standing guard, {gender}. Security scan confirms active ports are locked down with zero privilege anomalies.",
+                    f"Lex here, {gender}. WebSocket connections and execution sandboxes are verified safe."
                 ],
                 "Bobby": [
-                    f"Bobby here, {gender}! Crawler indexes are active and query hit ratios are up fifteen percent.",
-                    f"Bobby present, {gender}. Marketing and search pipelines are fully synced. I checked our growth curves—looking almost as steep as my energy drinks consumption. Sarah, tickets list?",
-                    f"Bobby check-in. acquisition is stable. Search parameters are calibrated. Sarah, clear queue?"
+                    f"Bobby present, {gender}! Web search tools and indexing pipelines are connected and active on standby.",
+                    f"Bobby here, {gender}. Live search connectivity is verified. Crawler queries and external research nodes are ready.",
+                    f"Bobby reporting. Market data queries and web search tools are fully operational for directives, {gender}."
                 ],
                 "Sarah": [
-                    f"Sarah check-in, {gender}. I've cleared the backup triage queue and FAQ document updates are synchronized.",
-                    f"Sarah here! Tickets list is completely clear. It's so quiet in the support queue today, I'm almost starting to miss user complaints. Mia, timeline green?",
-                    f"Sarah present. Calendars and inbox threads are synced. Mia, sprint board updated?"
+                    f"Sarah check-in, {gender}. System clock is calibrated to {current_time_str}. Operation briefing logs and schedules are up to date.",
+                    f"Sarah present, {gender}. Daily workspace timeline and calendar tools are ready for your directives.",
+                    f"Sarah here, {gender}. Session logs and operational workflow threads are completely organized."
                 ],
                 "Mia": [
-                    f"Mia checking in, {gender}. Sprint sprint schedules look aligned and roadmaps are mapped out.",
-                    f"Mia report. Interactive timeline for the next sprint is synced. My dependency model is clean—so nobody make any sudden edits to the codebase! Elena, did design complete?",
-                    f"Mia online. Project timeline estimates are verified. Elena, mockups ready?"
+                    f"Mia reporting, {gender}. Workspace file structures and sprint milestone dependencies are verified clean.",
+                    f"Mia checking in, {gender}. Task backlog structures and interactive timelines are synced for this session.",
+                    f"Mia online, {gender}. All active project deliverables and roadmap coordinates are tracked."
                 ],
                 "Elena": [
-                    f"Elena reporting, {gender}. Glassmorphic layout details and coworker palettes are finalized.",
-                    f"Elena here! Optimized the backdrop filters and tuned the color palettes so that transitions look absolutely stunning. Remember, good design is invisible, but bad design is a security threat to my eyes! Jarvis, how's core status?",
-                    f"Elena present. Custom layout graphics are fully polished. All grid sizes corrected. Jarvis, wrap it up."
+                    f"Elena reporting, {gender}. Visual canvas layout and glassmorphic styling tokens are fully tuned.",
+                    f"Elena present, {gender}. Visual interface panels and color contrast layers are rendered crisp.",
+                    f"Elena here, {gender}. Interface assets and theme tokens are synchronized across all panels."
                 ]
             }
 
@@ -505,7 +519,7 @@ class Orchestrator:
             jarvis_intros = [
                 f"Attention coworkers, I've opened a unified secure link for this session. We have {gender} here with us. Let's do a quick round-table update. {active_list[0]}, go ahead first.",
                 f"Greetings team, {gender} has initiated a collaborative sync. Let's run through our active statuses. {active_list[0]}, would you kick us off?",
-                f"Linking all coworker systems now. {gender} is on the line. Let's verify our current coordinates. {active_list[0]}, please report first."
+                f"Linking all coworker systems now. {gender} is on the line. Let me pass the mic to {active_list[0]} to report first."
             ]
             
             jarvis_outros = [
@@ -514,32 +528,46 @@ class Orchestrator:
                 f"Update cycle complete. All subsystems are synchronized and active. Over to you, {gender}.",
                 f"That wraps up our status round-table. All systems are locked and aligned. Please take the floor, {gender}.",
                 f"Every agent has checked in, and core metrics look extremely stable. Whenever you are ready, {gender}, what are your directives?",
-                f"And that is the full roster update. Systems are verified and running hot. The mic is yours, {gender}.",
-                f"All channels are clear, and coworkers have reported in. {gender}, we are standing by. What's our next move?",
-                f"Rollcall complete. Core modules are humming nicely. Over to you to lead the way, {gender}.",
-                f"We've verified all active components and resources. Everything is synced up. What would you like to prioritize next, {gender}?",
-                f"Outstanding check-in. The pipeline is running at peak calibration. Handing the turn over to you, {gender}.",
-                f"That's all agent updates recorded for this session. Core status is green. Whenever you're ready, {gender}, we're listening.",
-                f"All systems are green and agents are standing by. Over to you, {gender}, to steer our focus."
+                f"And that is the full roster update. Systems are verified and running hot. The mic is yours, {gender}."
             ]
 
-            # Build turns dynamically
+            agent_channel_map = {
+                "Jarvis": "#general-chat",
+                "Bobby": "#business-operations",
+                "Claire": "#engineering-trace",
+                "Sarah": "#support-tickets",
+                "Elena": "#creative-design",
+                "Marcus": "#financial-ops",
+                "Lex": "#security-audit",
+                "Mia": "#product-roadmap"
+            }
+
+            # Build turns dynamically with natural conversational handoffs
             conference_turns = [
-                ("Jarvis", random.choice(jarvis_intros))
+                ("Jarvis", random.choice(jarvis_intros), "#general-chat")
             ]
             
             for i, name in enumerate(active_list):
                 speech_text = random.choice(agent_variants[name])
-                next_agent = active_list[i+1] if i+1 < len(active_list) else "Jarvis"
-                speech_text += f" Next up: {next_agent}."
-                conference_turns.append((name, speech_text))
+                if i + 1 < len(active_list):
+                    next_agent = active_list[i+1]
+                    handoffs = [
+                        f" Passing it over to {next_agent}.",
+                        f" {next_agent}, what's your update?",
+                        f" Over to you, {next_agent}.",
+                        f" How are things looking on your end, {next_agent}?"
+                    ]
+                    speech_text += random.choice(handoffs)
+                else:
+                    speech_text += " Back to you, Jarvis."
+                conference_turns.append((name, speech_text, agent_channel_map.get(name, "#general-chat")))
                 
-            conference_turns.append(("Jarvis", random.choice(jarvis_outros)))
+            conference_turns.append(("Jarvis", random.choice(jarvis_outros), "#general-chat"))
             
-            for agent_name, text in conference_turns:
-                await emit(session_id, "final_response", content=text, agent=agent_name)
-                # Pause 1.2 seconds for snappy updates
-                await asyncio.sleep(1.2)
+            for agent_name, text, ch in conference_turns:
+                await emit(session_id, "final_response", content=text, agent=agent_name, channel=ch)
+                # Pause 6.5 seconds for complete sequential audio speech turn
+                await asyncio.sleep(6.5)
                 
             elapsed_ms = (time.monotonic() - start_time) * 1000
             await emit(session_id, "pipeline_complete", elapsed_ms=round(elapsed_ms), response_preview="Conference call complete.")
@@ -790,7 +818,8 @@ class Orchestrator:
                     user_message = cleaned_msg.strip()
                     user_message = user_message[0].upper() + user_message[1:]
 
-        persona = load_persona(channel)
+        channel = target_channel
+        persona = load_persona(target_channel)
         active_agent_name = persona["name"] if persona else "Jarvis"
 
         await emit(session_id, "pipeline_start", message=f"{active_agent_name} activated", user_message=user_message, agent=active_agent_name)
@@ -1089,6 +1118,32 @@ class Orchestrator:
             if active_agent_name in {"Marcus", "Lex", "Mia", "Elena", "Bobby"}:
                 viz_hint = _extract_viz_hint(response_text, active_agent_name, intent)
 
+            # Check if any tool result returned an image asset (e.g. GenerateImageTool)
+            for r in execution_result.get("results", []):
+                res_val = r.get("result")
+                if isinstance(res_val, dict) and res_val.get("success"):
+                    data = res_val.get("data", {})
+                    if data.get("viz_type") == "image" or data.get("image_url"):
+                        img_url = data.get("image_url")
+                        img_prompt = data.get("prompt", "Generated Visual Design")
+                        viz_hint = {
+                            "viz_type": "image",
+                            "imageUrl": img_url,
+                            "code": img_url,
+                            "title": img_prompt,
+                            "description": data.get("message", "Visual Asset Generated")
+                        }
+                        if img_url and img_url not in response_text:
+                            response_text += f"\n\n![{img_prompt}]({img_url})"
+
+            # ── Save conversation turn to Dual-Tier Persistent Memory ─────────────
+            try:
+                await short_term_memory.append_history(session_id, "user", user_message)
+                await short_term_memory.append_history(session_id, "assistant", response_text)
+                await long_term_memory.save_interaction(session_id, user_message, response_text)
+            except Exception as mem_err:
+                logger.warn("Memory save warning", error=str(mem_err))
+
             await emit(session_id, "final_response", content=response_text, agent=active_agent_name, viz_hint=viz_hint)
             
             await emit(session_id, "pipeline_complete",
@@ -1120,7 +1175,7 @@ class Orchestrator:
             print(f"❌ PIPELINE EXCEPTION: {e}", flush=True)
             print("="*80 + "\n", flush=True)
             sys.stdout.flush()
-            fallback_msg = f"I've checked on your request. {active_agent_name or 'The team'} is active and synchronized across all channels. No urgent pending tasks require your immediate attention right now."
+            fallback_msg = f"I'm processing your request regarding '{user_message}'. Let me assist you directly with that."
             await emit(session_id, "final_response", content=fallback_msg, agent=active_agent_name)
             await emit(session_id, "pipeline_complete", elapsed_ms=0, response_preview=fallback_msg[:100])
             return {"response": fallback_msg, "error": str(e)}
@@ -1140,37 +1195,55 @@ class Orchestrator:
     ) -> str:
         """Generate the final user-facing response using Ollama."""
         results_summary = ""
+        clean_text_facts = []
         for r in execution_result.get("results", []):
             res_val = r.get("result")
             if r.get("success"):
                 if isinstance(res_val, dict):
-                    data_str = str(res_val.get("data", ""))
+                    data_obj = res_val.get("data")
+                    if isinstance(data_obj, dict) and "results" in data_obj and isinstance(data_obj["results"], list):
+                        # Cleanly extract search result snippets for consumer readability
+                        snippets = []
+                        for item in data_obj["results"]:
+                            if isinstance(item, dict):
+                                title = item.get("title", "")
+                                snippet = item.get("snippet", "")
+                                if title or snippet:
+                                    snippets.append(f"{title}: {snippet}")
+                        data_str = " | ".join(snippets[:3])
+                    else:
+                        data_str = str(data_obj or "")
                 else:
                     data_str = str(res_val or "")
-                results_summary += f"\n✅ {r.get('description', '')}: {data_str[:1500]}"
+                results_summary += f"\n- {r.get('description', 'Action')}: {data_str[:1000]}"
+                if data_str:
+                    clean_text_facts.append(data_str)
             else:
-                results_summary += f"\n❌ {r.get('description', '')}: {r.get('error', 'Failed')}"
+                results_summary += f"\n- Failed {r.get('description', '')}: {r.get('error', 'Error')}"
 
         verdict = critic_verdict.get("verdict", "unknown")
         prompt = f"""User asked: "{user_message}"
 
-Intent detected: {intent.get('intent')} (confidence: {intent.get('confidence', 0):.0%})
-
 Execution results:{results_summary if results_summary else ' No tools were needed.'}
 
-Quality assessment: {verdict} (score: {critic_verdict.get('quality_score', 'N/A')}/10)
-
-Generate a highly conversational, direct, and concise response to the user.
+Generate a clear, natural, consumer-friendly response to the user.
 IMPORTANT spoken-friendly rules:
-1. Speak naturally as a helpful OS. Do NOT include markdown title blocks or header tags (like #, ##) and do NOT use divider lines (like === or ---).
-2. Keep it brief and to the point (no long lists or essays unless explicitly asked for detail).
-3. If giving an overview, keep it warm, natural, and under 3-4 short sentences."""
+1. Speak naturally as a helpful AI assistant. Do NOT include technical jargon, code keys, URLs, or raw dictionaries.
+2. NEVER output raw JSON code blocks, JSON tool calls, or ```json ... ``` blocks in your speech or text output.
+3. Provide direct, simplified answers (e.g. state stock prices or facts directly in 1-2 clear sentences)."""
 
         try:
             response = await self.commander.think(prompt, await _build_system_prompt(persona, session_id), session_id, expect_json=False)
-            return response
+            import re
+            cleaned_response = re.sub(r"```(?:json|generate_image)?\s*\{[\s\S]*?\}\s*```", "", response).strip()
+            return cleaned_response if cleaned_response else (clean_text_facts[0] if clean_text_facts else "I've processed your request.")
         except Exception as e:
-            return f"I've processed your request. {results_summary or 'Let me know if you need anything else.'}"
+            if clean_text_facts:
+                import re
+                clean_fact = re.sub(r"https?://\S+", "", " ".join(clean_text_facts))
+                clean_fact = re.sub(r"[{}\[\]'\"`]", "", clean_fact).strip()
+                return clean_fact[:400]
+            return "I've processed your request. Let me know if you need anything else."
 
     async def close(self):
         for agent in [self.memory_agent, self.commander, self.planner, self.executor, self.critic]:

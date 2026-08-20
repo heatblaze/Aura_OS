@@ -494,12 +494,15 @@ class GenerateImageTool(BaseTool):
     requires_auth = False
 
     async def _run(self, params: dict) -> ToolResult:
-        prompt = params.get("prompt") or params.get("description") or params.get("query") or "creative logo design"
+        raw_prompt = params.get("prompt") or params.get("description") or params.get("query") or "creative logo design"
         width = params.get("width", 1024)
         height = params.get("height", 1024)
 
+        # Enhance prompt for professional vector graphic quality
+        enhanced_prompt = f"{raw_prompt}, high contrast graphic design, crisp typography, clean vector emblem logo, 8k resolution, photorealistic studio lighting"
+
         import urllib.parse
-        encoded = urllib.parse.quote(prompt)
+        encoded = urllib.parse.quote(enhanced_prompt)
 
         # Free, instant Pollinations FLUX image generation endpoint (requires no API key)
         image_url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true"
@@ -507,10 +510,10 @@ class GenerateImageTool(BaseTool):
         return ToolResult(
             success=True,
             data={
-                "prompt": prompt,
+                "prompt": raw_prompt,
                 "image_url": image_url,
                 "viz_type": "image",
-                "message": f"Generated visual design for: '{prompt}'"
+                "message": f"Generated visual design for: '{raw_prompt}'"
             },
             metadata={"tool": self.name}
         )

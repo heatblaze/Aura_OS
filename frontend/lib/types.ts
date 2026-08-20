@@ -52,6 +52,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
+  agentName?: string;
   intent?: IntentResult;
   isStreaming?: boolean;
 }

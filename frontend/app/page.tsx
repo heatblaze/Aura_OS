@@ -106,7 +106,9 @@ function isValidVizData(vd: any): boolean {
     (vd.metrics && vd.metrics.length > 0) ||
     (vd.headers && vd.headers.length > 0) ||
     (vd.tableRows && vd.tableRows.length > 0) ||
-    vd.code
+    vd.code ||
+    vd.imageUrl ||
+    vd.type === "image"
   );
 }
 
@@ -143,6 +145,7 @@ export default function JarvisPage() {
   const [liveStats, setLiveStats] = useState<any>(null);
   const [activeChannel, setActiveChannel] = useState("#general-chat");
   const activeChannelRef = useRef(activeChannel);
+  const dynamicGreetingRef = useRef<string | null>(null);
 
   useEffect(() => {
     activeChannelRef.current = activeChannel;
@@ -159,6 +162,15 @@ export default function JarvisPage() {
     "#product-roadmap": [],
   });
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        // Clear old session storage so a new session starts 100% fresh with dynamic Jarvis greeting
+        sessionStorage.removeItem("aura_messages_by_channel");
+      } catch {}
+    }
+  }, []);
+
   const messages = messagesByChannel[activeChannel] || [];
 
   const activeCoworker =
@@ -170,16 +182,36 @@ export default function JarvisPage() {
               activeChannel === "#security-audit" ? "Lex" :
                 activeChannel === "#product-roadmap" ? "Mia" : "Jarvis";
 
-  const addMessage = useCallback((channel: string, role: "user" | "assistant" | "system", content: string) => {
-    setMessagesByChannel(prev => ({
-      ...prev,
-      [channel]: [...(prev[channel] || []), {
-        id: uuidv4(),
-        role,
-        content,
-        timestamp: new Date().toISOString()
-      }]
-    }));
+  const addMessage = useCallback((channel: string, role: "user" | "assistant" | "system", content: string, agentName?: string) => {
+    const channelCoworkerMap: Record<string, string> = {
+      "#business-operations": "Bobby",
+      "#engineering-trace": "Claire",
+      "#support-tickets": "Sarah",
+      "#creative-design": "Elena",
+      "#financial-ops": "Marcus",
+      "#security-audit": "Lex",
+      "#product-roadmap": "Mia",
+      "#general-chat": "Jarvis"
+    };
+    const resolvedAgent = agentName || (role === "assistant" ? (channelCoworkerMap[channel] || "Jarvis") : undefined);
+
+    setMessagesByChannel(prev => {
+      const existing = prev[channel] || [];
+      // Prevent duplicate appends of the exact same content within short timeframes
+      if (existing.some(m => m.content === content && m.role === role && (m.agentName || "Jarvis") === (resolvedAgent || "Jarvis"))) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [channel]: [...existing, {
+          id: uuidv4(),
+          role,
+          content,
+          agentName: resolvedAgent,
+          timestamp: new Date().toISOString()
+        }]
+      };
+    });
   }, []);
 
   const [agentLog, setAgentLog] = useState<AgentLogEntry[]>([]);
@@ -305,19 +337,22 @@ export default function JarvisPage() {
   }
 
   async function playSpeechItem(text: string, agentName: string, channel: string, alreadyDisplayed: boolean, vizData: VizData | null = null) {
-    // Filter out markdown formatting markers & quotes so the voice doesn't pronounce them literal marks
+    // Filter out markdown formatting markers, URLs, & code dictionary keys for consumer voice clarity
     let cleanText = text
       .replace(/Simulation Warning:/gi, "")
       .replace(/I must warn you that:/gi, "")
       .replace(/Confirmation: Response Received/gi, "")
       .replace(/Confirmation:/gi, "")
       .replace(/Message Details:/gi, "")
+      .replace(/https?:\/\/\S+/gi, "") // Strip URLs
+      .replace(/['"]?(?:query|results|title|url|snippet)['"]?\s*:\s*/gi, " ") // Strip raw dict keys
+      .replace(/[{}[\]'"`]/g, " ")       // Strip raw code brackets and quotes
       .replace(/To:/gi, "to")
       .replace(/Message:/gi, "message")
       .replace(/^[=\-*\s]{3,}$/gm, "") // Clean divider lines like ===, ---, ***
-      .replace(/[=*#_`>~\-"']/g, "")   // Added = to the replaced character set
+      .replace(/[=*#_`>~\-"']/g, "")   // Clean formatting marks
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/\n+/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
 
     const onSpeechFinished = () => {
@@ -353,48 +388,64 @@ export default function JarvisPage() {
       "mia": "mia_voice_id_placeholder",
     };
     const voiceId = voiceMap[agentName.toLowerCase()] || voiceMap["jarvis"];
+    const isConference = conferenceSessionRef.current;
+
+    // Standard 1-on-1 mode: Render text instantly without waiting for audio network payload
+    if (!isConference) {
+      setActiveChannel(channel);
+      if (vizData) {
+        setVizPanelData(vizData);
+      }
+      if (!alreadyDisplayed) {
+        addMessage(channel, "assistant", text, agentName);
+      }
+    }
+
+    const triggerAudioStartSync = () => {
+      if (isConference) {
+        setConferenceSpeaker(agentName);
+        if (!alreadyDisplayed) {
+          addMessage(channel, "assistant", text, agentName);
+        }
+      } else {
+        setActiveChannel(channel);
+        if (!alreadyDisplayed) {
+          addMessage(channel, "assistant", text, agentName);
+        }
+      }
+      if (vizData) {
+        setVizPanelData(vizData);
+      }
+    };
 
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
-      const configRes = await fetch(`${apiBase}/api/tts/config`);
-      const config = await configRes.json();
+      const ttsRes = await fetch(`${apiBase}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleanText, voice_id: voiceId }),
+      });
 
-      if (config.available) {
-        const ttsRes = await fetch(`${apiBase}/api/tts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: cleanText, voice_id: voiceId }),
-        });
-
-        if (ttsRes.ok) {
-          const blob = await ttsRes.blob();
-          if (blob.type.startsWith("audio/") && blob.size > 100) {
-            const audioUrl = URL.createObjectURL(blob);
-            const audio = new Audio(audioUrl);
-            currentAudioRef.current = audio;
-            audio.onended = () => {
-              if (currentAudioRef.current === audio) {
-                currentAudioRef.current = null;
-              }
-              onSpeechFinished();
-            };
-            audio.onerror = () => {
-              onSpeechFinished();
-            };
-            // Sync active channel and display text precisely when the audio starts playing
-            setActiveChannel(channel);
-            if (conferenceSessionRef.current) {
-              setConferenceSpeaker(agentName);
+      if (ttsRes.ok) {
+        const blob = await ttsRes.blob();
+        if (blob.type.startsWith("audio/") && blob.size > 100) {
+          const audioUrl = URL.createObjectURL(blob);
+          const audio = new Audio(audioUrl);
+          currentAudioRef.current = audio;
+          audio.onplay = () => {
+            triggerAudioStartSync();
+          };
+          audio.onended = () => {
+            if (currentAudioRef.current === audio) {
+              currentAudioRef.current = null;
             }
-            if (vizData) {
-              setVizPanelData(vizData);
-            }
-            if (!alreadyDisplayed) {
-              addMessage(channel, "assistant", text);
-            }
-            await audio.play();
-            return;
-          }
+            onSpeechFinished();
+          };
+          audio.onerror = () => {
+            onSpeechFinished();
+          };
+          await audio.play();
+          return;
         }
       }
     } catch (err) {
@@ -416,16 +467,7 @@ export default function JarvisPage() {
         utterance.voice = preferredVoice;
       }
       utterance.onstart = () => {
-        setActiveChannel(channel);
-        if (conferenceSessionRef.current) {
-          setConferenceSpeaker(agentName);
-        }
-        if (vizData) {
-          setVizPanelData(vizData);
-        }
-        if (!alreadyDisplayed) {
-          addMessage(channel, "assistant", text);
-        }
+        triggerAudioStartSync();
       };
       utterance.onend = () => {
         onSpeechFinished();
@@ -435,10 +477,7 @@ export default function JarvisPage() {
       };
       window.speechSynthesis.speak(utterance);
     } else {
-      setActiveChannel(channel);
-      if (!alreadyDisplayed) {
-        addMessage(channel, "assistant", text);
-      }
+      triggerAudioStartSync();
       onSpeechFinished();
     }
   }
@@ -746,8 +785,20 @@ export default function JarvisPage() {
     ws.on("*", (event: JarvisEvent) => {
       addLogEntry(event);
       if (event.type === "connected" && event.message) {
-        // Log welcome message under the general chat channel
-        addMessage("#general-chat", "assistant", event.message);
+        const dynamicGreeting = event.message;
+        dynamicGreetingRef.current = dynamicGreeting;
+        setMessagesByChannel(prev => {
+          const genMsgs = (prev["#general-chat"] || []).filter(m => m.id !== "init_greeting");
+          return {
+            ...prev,
+            "#general-chat": [{
+              id: "init_greeting",
+              role: "assistant",
+              content: dynamicGreeting,
+              timestamp: new Date().toISOString()
+            }, ...genMsgs]
+          };
+        });
       } else if (event.type === "final_response") {
         // Backend emit() sends content at top level OR inside data — check both
         const ev = event as any;
@@ -764,7 +815,7 @@ export default function JarvisPage() {
           "lex": "#security-audit",
           "mia": "#product-roadmap"
         };
-        const targetChannel = coworkerChannelMap[responderAgent.toLowerCase()] || activeChannelRef.current;
+        const targetChannel = ev.channel || ev.data?.channel || coworkerChannelMap[responderAgent.toLowerCase()] || activeChannelRef.current;
 
         // ── Visual data panel ─────────────────────────────────
         const ev2 = event as any;
@@ -807,7 +858,7 @@ export default function JarvisPage() {
       } else if (event.type === "switch_channel") {
         const ev = event as any;
         const targetChannel = ev.channel || ev.data?.channel;
-        if (targetChannel) {
+        if (targetChannel && !conferenceSessionRef.current) {
           setActiveChannel(targetChannel);
         }
       }
@@ -866,6 +917,15 @@ export default function JarvisPage() {
             });
           };
 
+          const imgMatch = line.match(/!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/);
+          if (imgMatch) {
+            return (
+              <div key={lineIdx} style={{ margin: "8px 0", borderRadius: "12px", overflow: "hidden", border: "1px solid rgba(0,212,255,0.2)", background: "#050814", maxWidth: "440px", boxShadow: "0 4px 20px rgba(0,0,0,0.5)" }}>
+                <img src={imgMatch[2]} alt={imgMatch[1] || "Visual Design"} style={{ width: "100%", maxHeight: "360px", objectFit: "contain", display: "block" }} />
+              </div>
+            );
+          }
+
           // Check if it's a bullet item (starts with optional spaces, then - or * or +, then a space)
           const listMatch = line.match(/^(\s*)[-*+]\s+(.*)/);
           // Check if it's a numbered item (starts with optional spaces, then digits, then . or ), then a space)
@@ -921,16 +981,10 @@ export default function JarvisPage() {
     const source = inputSourceRef.current;
     inputSourceRef.current = "text"; // reset to default for keyboard typing
 
-    // Detect conference protocol to activate the meeting modal (ARISE rollcall is separate, no modal)
+    // Detect conference protocol to activate the meeting modal
     const msgLower = msg.toLowerCase();
     const isMeetingStart = (
-      /start\s+(meeting|conference)/i.test(msgLower) ||
-      /join\s+(meeting|conference)/i.test(msgLower) ||
-      /initiate\s+(meeting|conference)/i.test(msgLower) ||
-      /call\s+(meeting|conference)/i.test(msgLower) ||
-      /run\s+(meeting|conference)/i.test(msgLower) ||
-      /host\s+(meeting|conference)/i.test(msgLower) ||
-      /setup\s+(meeting|conference)/i.test(msgLower)
+      /meeting|conference|all hands|roundtable|standup|debrief|roll call|team sync/i.test(msgLower)
     );
     if (isMeetingStart) {
       conferenceSessionRef.current = true;
@@ -996,9 +1050,10 @@ export default function JarvisPage() {
                   window.history.pushState({ view: "app" }, "", "#app");
                 } catch {}
                 setShowWelcome(false);
-                // Trigger initial audio greeting on Launch OS click
+                const greetingMsg = dynamicGreetingRef.current || `Welcome back, ${detectedGender === "sir" ? "Sir" : "Ma'am"}. Aura OS is online and operational.`;
+                // Trigger dynamic time-of-day audio greeting on Launch OS click
                 speakText(
-                  `Welcome back, ${detectedGender === "sir" ? "Sir" : "Ma'am"}. Aura OS is online and adaptive.`,
+                  greetingMsg,
                   "Jarvis",
                   targetCh,
                   true
@@ -1382,7 +1437,7 @@ export default function JarvisPage() {
                           color: msg.role === "user" ? "var(--accent-cyan)" :
                             msg.role === "system" ? "var(--accent-red)" : "var(--accent-purple)"
                         }}>
-                          {msg.role === "user" ? "OPERATOR" : msg.role === "system" ? "SYSTEM" : activeCoworker.toUpperCase()}
+                          {msg.role === "user" ? "OPERATOR" : msg.role === "system" ? "SYSTEM" : (msg.agentName || activeCoworker).toUpperCase()}
                         </span>
                         <span style={{ fontSize: 8, color: "var(--text-muted)" }}>
                           {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

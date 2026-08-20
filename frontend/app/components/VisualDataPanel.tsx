@@ -457,26 +457,29 @@ export default function VisualDataPanel({ data, onClose }: VisualDataPanelProps)
                 )}
 
                 {/* Render by type */}
-                {data.type === "chart" && data.rows && (
-                  <BarChartRenderer rows={data.rows} color={color} />
-                )}
-                {data.type === "line" && data.rows && (
-                  <LineChartRenderer points={data.rows} color={color} />
-                )}
-                {data.type === "metrics" && data.metrics && (
-                  <MetricCardsRenderer metrics={data.metrics} color={color} />
-                )}
-                {data.type === "table" && data.headers && data.tableRows && (
-                  <TableRenderer headers={data.headers} rows={data.tableRows} color={color} />
-                )}
-                {data.type === "code" && data.code && (
-                  <CodeRenderer code={data.code} color={color} />
-                )}
-                {data.type === "info" && data.code && (
-                  <InfoRenderer text={data.code} color={color} />
-                )}
-                {(data.type === "image" || (data as any).imageUrl) && (
-                  <ImageRenderer imageUrl={(data as any).imageUrl || (data as any).code || ""} prompt={data.title} color={color} />
+                {(data.type === "image" || (data as any).imageUrl || (data as any).image_url) ? (
+                  <ImageRenderer imageUrl={(data as any).imageUrl || (data as any).image_url || (data as any).code || ""} prompt={data.title || data.description} color={color} />
+                ) : (
+                  <>
+                    {data.type === "chart" && data.rows && (
+                      <BarChartRenderer rows={data.rows} color={color} />
+                    )}
+                    {data.type === "line" && data.rows && (
+                      <LineChartRenderer points={data.rows} color={color} />
+                    )}
+                    {data.type === "metrics" && data.metrics && (
+                      <MetricCardsRenderer metrics={data.metrics} color={color} />
+                    )}
+                    {data.type === "table" && data.headers && data.tableRows && (
+                      <TableRenderer headers={data.headers} rows={data.tableRows} color={color} />
+                    )}
+                    {data.type === "code" && data.code && (
+                      <CodeRenderer code={data.code} color={color} />
+                    )}
+                    {data.type === "info" && data.code && (
+                      <InfoRenderer text={data.code} color={color} />
+                    )}
+                  </>
                 )}
 
                 {/* Mixed: metrics + chart */}

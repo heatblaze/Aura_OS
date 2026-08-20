@@ -29,11 +29,16 @@ class ToolRegistry:
         logger.info("Tool registered", name=tool.name, configured=tool.is_configured())
 
     def get(self, name: str) -> Optional[BaseTool]:
-        if name in self._tools:
-            return self._tools.get(name)
-        # Map planner tool aliases (twilio_sms/twilio_call) to the registered "twilio" tool
-        if name in {"twilio_sms", "twilio_call"}:
+        if not name:
+            return None
+        name_clean = name.lower().strip()
+        if name_clean in self._tools:
+            return self._tools.get(name_clean)
+        # Map planner tool aliases
+        if name_clean in {"twilio_sms", "twilio_call"}:
             return self._tools.get("twilio")
+        if name_clean in {"generate_image", "image_generator", "generate_image_tool", "image_generation", "dall_e", "flux"}:
+            return self._tools.get("generate_image")
         return None
 
     def list_all(self) -> list[dict]:

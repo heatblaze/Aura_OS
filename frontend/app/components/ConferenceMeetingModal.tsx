@@ -109,9 +109,6 @@ export default function ConferenceMeetingModal({
       if (typeof window !== "undefined") {
         localStorage.setItem("conf_participants", JSON.stringify(next));
       }
-      // Notify the orchestrator about who is present on call
-      const activeList = Object.keys(next).filter(k => next[k]);
-      sendMessage(`System Update: Conference call participants modified: ${activeList.join(", ")}`);
       return next;
     });
   };
@@ -173,6 +170,8 @@ export default function ConferenceMeetingModal({
       {isOpen && (
         <motion.div
           key="conference-modal"
+          drag
+          dragMomentum={false}
           initial={{ opacity: 0, y: 40, scale: 0.97 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 40, scale: 0.97 }}
