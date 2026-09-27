@@ -5,7 +5,7 @@ Falls back to an in-memory dict if Redis is unavailable.
 """
 import json
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 import structlog
@@ -33,8 +33,8 @@ class ShortTermMemory:
             )
             await self._redis.ping()
             logger.info("ShortTermMemory connected to Redis")
-        except Exception as e:
-            logger.warning("Redis unavailable for STM, using dict fallback", error=str(e))
+        except Exception:
+            logger.info("Redis not detected — active with In-Memory dict fallback for Short-Term Memory")
             self._use_fallback = True
 
     async def disconnect(self):
@@ -46,7 +46,7 @@ class ShortTermMemory:
     async def set(self, session_id: str, key: str, value: Any):
         full_key = f"jarvis:stm:{session_id}:{key}"
         data = json.dumps(value)
-        if self._use_fallback:
+        if self._use_fallback or not self._redis:
             if session_id not in self._fallback:
                 self._fallback[session_id] = {}
             self._fallback[session_id][key] = value
@@ -55,7 +55,7 @@ class ShortTermMemory:
 
     async def get(self, session_id: str, key: str, default: Any = None) -> Any:
         full_key = f"jarvis:stm:{session_id}:{key}"
-        if self._use_fallback:
+        if self._use_fallback or not self._redis:
             return self._fallback.get(session_id, {}).get(key, default)
         data = await self._redis.get(full_key)
         if data is None:
@@ -64,7 +64,7 @@ class ShortTermMemory:
 
     async def delete(self, session_id: str, key: str):
         full_key = f"jarvis:stm:{session_id}:{key}"
-        if self._use_fallback:
+        if self._use_fallback or not self._redis:
             self._fallback.get(session_id, {}).pop(key, None)
             return
         await self._redis.delete(full_key)
@@ -77,12 +77,16 @@ class ShortTermMemory:
         history.append({
             "role": role,
             "content": content,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         # Keep last 50 messages
         if len(history) > 50:
             history = history[-50:]
         await self.set(session_id, "conversation_history", history)
+
+    async def append_history(self, session_id: str, role: str, content: str):
+        """Alias for append_message for compatibility."""
+        await self.append_message(session_id, role, content)
 
     async def get_conversation_history(self, session_id: str) -> list[dict]:
         return await self.get(session_id, "conversation_history", [])
@@ -115,13 +119,14 @@ class ShortTermMemory:
 
     async def clear_session(self, session_id: str):
         """Wipe all session data."""
-        if self._use_fallback:
+        if self._use_fallback or not self._redis:
             self._fallback.pop(session_id, None)
             return
         pattern = f"jarvis:stm:{session_id}:*"
         keys = await self._redis.keys(pattern)
         if keys:
             await self._redis.delete(*keys)
+
 
 
 # Singleton

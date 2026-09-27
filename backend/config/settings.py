@@ -54,11 +54,15 @@ class Settings(BaseSettings):
 
     # Groq Cloud LLM (optional)
     GROQ_API_KEY: Optional[str] = None
+    GROQ_API_KEY_SECONDARY: Optional[str] = None
     GROQ_MODEL: Optional[str] = "openai/gpt-oss-20b"
     LLM_PROVIDER: str = "groq" # "groq" to use Groq API, "ollama" to force local Qwen 2.5
 
     # NVIDIA Cloud LLM (optional fallback)
     NVIDIA_API_KEY: Optional[str] = None
+
+    # Hugging Face API Key
+    HUGGINGFACE_API_KEY: Optional[str] = None
 
     # Security
     SECRET_KEY: str = "change-me-in-production-please"

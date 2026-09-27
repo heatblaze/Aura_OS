@@ -56,9 +56,10 @@ class KnowledgeMemory:
             logger.info("KnowledgeMemory active using In-Memory Vector Store")
             self._available = False
             return
-        except Exception as e:
-            logger.warning("ChromaDB unavailable, using list fallback", error=str(e))
+        except Exception:
+            logger.info("ChromaDB not detected — active with In-Memory list fallback for KnowledgeMemory")
             self._available = False
+
 
     async def store(
         self,

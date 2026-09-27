@@ -1,0 +1,32 @@
+[
+  {
+    "id": "14d6e05f",
+    "name": "AURA_OS_logo_emblem.png",
+    "filename": "20260925_123439_14d6e05f_AURA_OS_logo_emblem.png",
+    "category": "images",
+    "path": "D:\\daw n\\P.A\\backend\\storage\\virtual_desktop\\images\\20260925_123439_14d6e05f_AURA_OS_logo_emblem.png",
+    "relative_url": "/api/desktop/file/14d6e05f",
+    "size_bytes": 11536,
+    "created_at": "2026-09-25T12:34:39.098528",
+    "source_tool": "generate_image",
+    "metadata": {
+      "prompt": "AURA OS logo emblem",
+      "model": "AURA Local Graphic Engine"
+    }
+  },
+  {
+    "id": "b716836f",
+    "name": "AURA_OS_logo_emblem.png",
+    "filename": "20260925_123254_b716836f_AURA_OS_logo_emblem.png",
+    "category": "images",
+    "path": "D:\\daw n\\P.A\\backend\\storage\\virtual_desktop\\images\\20260925_123254_b716836f_AURA_OS_logo_emblem.png",
+    "relative_url": "/api/desktop/file/b716836f",
+    "size_bytes": 0,
+    "created_at": "2026-09-25T12:32:54.793217",
+    "source_tool": "generate_image",
+    "metadata": {
+      "prompt": "AURA OS logo emblem",
+      "model": "HuggingFace FLUX.1-schnell"
+    }
+  }
+]

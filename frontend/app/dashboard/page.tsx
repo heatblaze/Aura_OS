@@ -70,8 +70,12 @@ export default function DashboardPage() {
     setMounted(true);
     const fetchStats = async () => {
       try {
-        const res = await fetch(`${API_BASE}/system/stats`);
-        if (res.ok) setLiveStats(await res.json());
+        let res = await fetch(`${API_BASE}/system/stats`).catch(() => null);
+        if (!res || !res.ok) {
+          const fallbackBase = API_BASE.includes(":10000") ? API_BASE.replace(":10000", ":8000") : "http://localhost:8000";
+          res = await fetch(`${fallbackBase}/system/stats`).catch(() => null);
+        }
+        if (res && res.ok) setLiveStats(await res.json());
       } catch { /* Backend offline, use placeholders */ }
     };
     fetchStats();

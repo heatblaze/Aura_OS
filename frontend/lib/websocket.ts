@@ -15,48 +15,64 @@ export class JarvisWebSocket {
 
   constructor(sessionId: string, baseUrl?: string, gender = "sir") {
     this.sessionId = sessionId;
-    const finalBaseUrl = baseUrl || (typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000") : "ws://localhost:8000");
+    const defaultUrl = typeof window !== "undefined" ? (process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000") : "ws://localhost:8000";
+    const finalBaseUrl = baseUrl || defaultUrl;
     const tz = typeof window !== "undefined" ? encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone) : "";
     this.url = `${finalBaseUrl}/ws/${sessionId}?gender=${gender}&timezone=${tz}`;
   }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url);
+      const tryConnect = (wsUrl: string, isFallback = false) => {
+        try {
+          this.ws = new WebSocket(wsUrl);
 
-        this.ws.onopen = () => {
-          this.reconnectAttempts = 0;
-          this.onStatusChange?.(true);
-          resolve();
-        };
+          this.ws.onopen = () => {
+            this.url = wsUrl;
+            this.reconnectAttempts = 0;
+            this.onStatusChange?.(true);
+            resolve();
+          };
 
-        this.ws.onmessage = (event) => {
-          try {
-            const data: JarvisEvent = JSON.parse(event.data);
-            this._dispatch(data.type, data);
-            this._dispatch("*", data); // wildcard
-          } catch (e) {
-            console.error("Failed to parse WebSocket message:", e);
+          this.ws.onmessage = (event) => {
+            try {
+              const data: JarvisEvent = JSON.parse(event.data);
+              this._dispatch(data.type, data);
+              this._dispatch("*", data); // wildcard
+            } catch (e) {
+              console.error("Failed to parse WebSocket message:", e);
+            }
+          };
+
+          this.ws.onerror = (error) => {
+            if (!isFallback && wsUrl.includes(":10000")) {
+              const fallbackUrl = wsUrl.replace(":10000", ":8000");
+              console.warn(`WebSocket connection failed on port 10000, attempting fallback to port 8000...`);
+              tryConnect(fallbackUrl, true);
+              return;
+            }
+            console.error("WebSocket connection error:", error);
+            reject(new Error(`Failed to connect to Neural Link at ${wsUrl}. Ensure backend server is active.`));
+          };
+
+          this.ws.onclose = () => {
+            this.onStatusChange?.(false);
+            this._dispatch("disconnected" as any, {
+              type: "disconnected" as any,
+              timestamp: new Date().toISOString(),
+            });
+            this._tryReconnect();
+          };
+        } catch (e) {
+          if (!isFallback && wsUrl.includes(":10000")) {
+            tryConnect(wsUrl.replace(":10000", ":8000"), true);
+          } else {
+            reject(e);
           }
-        };
+        }
+      };
 
-        this.ws.onerror = (error) => {
-          console.error("WebSocket connection error:", error);
-          reject(new Error(`Failed to connect to Neural Link at ${this.url}. Ensure the backend server is running on port 8000.`));
-        };
-
-        this.ws.onclose = () => {
-          this.onStatusChange?.(false);
-          this._dispatch("disconnected" as any, {
-            type: "disconnected" as any,
-            timestamp: new Date().toISOString(),
-          });
-          this._tryReconnect();
-        };
-      } catch (e) {
-        reject(e);
-      }
+      tryConnect(this.url);
     });
   }
 

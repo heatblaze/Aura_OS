@@ -4,10 +4,15 @@
       "root": ".",
       "extraPaths": [
         "backend/venv/Lib/site-packages",
-        "backend"
+        "."
       ]
     }
   ],
   "venvPath": "backend",
-  "venv": "venv"
+  "venv": "venv",
+  "extraPaths": [
+    "backend/venv/Lib/site-packages",
+    "."
+  ]
 }
+

@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import contextvars
 import httpx
 import structlog
@@ -34,81 +35,51 @@ class LLMClient:
             desc = agent_desc or f"{agent_name} is reasoning"
             await emit(session_id, "agent_thinking", agent=agent_name.lower(), message=f"{desc}...")
 
-        use_groq = bool(settings.GROQ_API_KEY) and settings.LLM_PROVIDER.lower() == "groq"
-        
-        if use_groq:
+        use_groq = settings.LLM_PROVIDER.lower() == "groq"
+        keys_to_try = [k for k in [settings.GROQ_API_KEY, getattr(settings, "GROQ_API_KEY_SECONDARY", None)] if k]
+        if use_groq and keys_to_try:
             logger.info("Routing prompt to Groq Cloud", agent=agent_name)
-            # Default Groq model (can be overridden by ContextVar for voice commands)
             override = current_model_override.get()
             model = override or settings.GROQ_MODEL or "openai/gpt-oss-20b"
-            # Intercept deprecated Llama 3.1 8b models and replace with openai/gpt-oss-20b
             if not model or "llama-3.1-8b" in model.lower() or "llama3.1" in model.lower():
                 model = "openai/gpt-oss-20b"
-            
-            headers = {
-                "Authorization": f"Bearer {settings.GROQ_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            max_retries = 2
-            backoff_delay = 0.5
-            current_model = model
 
-            for attempt in range(max_retries + 1):
+            for key in keys_to_try:
+                headers = {
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json"
+                }
                 payload: Dict[str, Any] = {
-                    "model": current_model,
+                    "model": model,
                     "messages": messages,
                     "temperature": temperature,
                     "stream": False
                 }
                 if json_mode:
                     payload["response_format"] = {"type": "json_object"}
-                    
+
                 try:
                     async with httpx.AsyncClient() as client:
-                        response = await client.post(self._groq_url, json=payload, headers=headers, timeout=20.0)
-                        
-                        # Handle 429 Rate Limits
-                        if response.status_code == 429:
-                            if attempt < max_retries:
-                                await asyncio.sleep(backoff_delay)
-                                backoff_delay *= 2.0
-                                continue
-                            else:
-                                raise httpx.HTTPStatusError("Groq Rate Limit Exceeded", request=response.request, response=response)
-                                
-                        response.raise_for_status()
-                        data = response.json()
-                        content = data["choices"][0]["message"]["content"]
-                        
-                        if session_id and agent_name:
-                            await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
-                        return content
+                        response = await client.post(self._groq_url, json=payload, headers=headers, timeout=25.0)
+                        if response.status_code == 200:
+                            data = response.json()
+                            content = data["choices"][0]["message"]["content"]
+                            if session_id and agent_name:
+                                await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
+                            return content
+                        else:
+                            logger.warning("Groq API key returned non-200 status", status=response.status_code)
                 except Exception as e:
-                    # If this is the last attempt or it's a non-429 status error, fail over to secondary/Ollama
-                    if attempt >= max_retries or (isinstance(e, httpx.HTTPStatusError) and e.response.status_code != 429):
-                        logger.error("Groq Cloud API failed, falling back to secondary provider", error=str(e))
-                        break
-                    
-                    logger.warning("Transient error on Groq, retrying...", error=str(e), attempt=attempt)
-                    await asyncio.sleep(backoff_delay)
-                    backoff_delay *= 2.0
+                    logger.warning("Groq API request error", error=str(e))
 
         # NVIDIA Cloud Fallback Engine (Runs when Groq fails and NVIDIA key is set)
         if settings.NVIDIA_API_KEY:
             logger.info("Routing prompt to NVIDIA NIM Cloud Fallback", agent=agent_name)
             nvidia_url = "https://integrate.api.nvidia.com/v1/chat/completions"
-            
-            # Map requested Groq model to equivalent NVIDIA NIM model
             override = current_model_override.get()
             requested_model = override or settings.GROQ_MODEL or "llama-3.3-70b-versatile"
             
-            if "70b" in requested_model.lower():
-                nvidia_model = "meta/llama-3.3-70b-instruct"
-            elif "8b" in requested_model.lower():
-                nvidia_model = "meta/llama-3.1-8b-instruct"
-            else:
-                nvidia_model = "meta/llama-3.3-70b-instruct"
+            nvidia_model = "meta/llama-3.3-70b-instruct"
 
             headers = {
                 "Authorization": f"Bearer {settings.NVIDIA_API_KEY}",
@@ -126,7 +97,6 @@ class LLMClient:
                 "model": nvidia_model,
                 "messages": nvidia_messages,
                 "temperature": temperature,
-                "top_p": 0.7,
                 "max_tokens": 1024,
                 "stream": False
             }
@@ -134,16 +104,16 @@ class LLMClient:
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(nvidia_url, json=payload, headers=headers, timeout=20.0)
-                    response.raise_for_status()
-                    data = response.json()
-                    content = data["choices"][0]["message"]["content"]
-                    
-                    if session_id and agent_name:
-                        await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
-                    logger.info("Successfully received response from NVIDIA NIM Cloud Fallback", agent=agent_name)
-                    return content
+                    if response.status_code == 200:
+                        data = response.json()
+                        content = data["choices"][0]["message"]["content"]
+                        if session_id and agent_name:
+                            await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
+                        return content
+                    else:
+                        logger.warning("NVIDIA NIM returned non-200 status", status=response.status_code)
             except Exception as e:
-                logger.error("NVIDIA Cloud Fallback failed, falling back to local Ollama", error=str(e))
+                logger.warning("NVIDIA NIM Cloud failed", error=str(e))
 
         # Local Ollama Fallback Engine
         logger.info("Routing prompt to Local Ollama", agent=agent_name, model=settings.OLLAMA_MODEL)

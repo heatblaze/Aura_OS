@@ -5,12 +5,13 @@ Stores behavioral patterns, user preferences, and action history.
 import json
 import os
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
-import aiofiles
+import aiofiles  # pyright: ignore[reportMissingTypeStubs]
 import structlog
 
 logger = structlog.get_logger(__name__)
+
 
 # ── SQLAlchemy async setup ─────────────────────────────────────
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -76,20 +77,28 @@ class LearntPattern(Base):
 
 class LongTermMemory:
     def __init__(self):
-        self._engine = None
-        self._session_factory = None
+        self._engine: Any = None
+        self._session_factory: Any = None
         self._available = False
         self._use_json_fallback = False
-        self._fallback_path = None
+        self._fallback_path: Optional[str] = None
+
 
     async def connect(self):
         try:
+            postgres_url = settings.POSTGRES_URL
+            if postgres_url.startswith("postgres://"):
+                postgres_url = postgres_url.replace("postgres://", "postgresql+asyncpg://", 1)
+            elif postgres_url.startswith("postgresql://") and not postgres_url.startswith("postgresql+asyncpg://"):
+                postgres_url = postgres_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
             self._engine = create_async_engine(
-                settings.POSTGRES_URL,
+                postgres_url,
                 echo=False,
                 pool_size=5,
                 max_overflow=10,
             )
+
             self._session_factory = async_sessionmaker(
                 self._engine, class_=AsyncSession, expire_on_commit=False
             )
@@ -101,8 +110,8 @@ class LongTermMemory:
             logger.info("LongTermMemory connected to PostgreSQL")
             # Auto-migrate any profiles (Google OAuth credentials) from local JSON fallback if present
             await self._migrate_fallback_to_postgres()
-        except Exception as e:
-            logger.warning("PostgreSQL unavailable, using local JSON file database fallback for LTM", error=str(e))
+        except Exception:
+            logger.info("PostgreSQL not detected — active with local JSON file database fallback for Long-Term Memory")
             self._available = True  # Set available to True so other components don't bypass operations
             self._use_json_fallback = True
             self._fallback_path = os.path.join("backend", "brain", "jarvis_ltm.json")
@@ -170,7 +179,7 @@ class LongTermMemory:
 
     async def _read_fallback(self) -> dict:
         try:
-            if not os.path.exists(self._fallback_path):
+            if not self._fallback_path or not os.path.exists(self._fallback_path):
                 return {"user_profiles": {}, "action_logs": [], "learnt_patterns": []}
             async with aiofiles.open(self._fallback_path, "r", encoding="utf-8") as f:
                 content = await f.read()
@@ -181,10 +190,13 @@ class LongTermMemory:
 
     async def _write_fallback(self, data: dict):
         try:
+            if not self._fallback_path:
+                return
             async with aiofiles.open(self._fallback_path, "w", encoding="utf-8") as f:
                 await f.write(json.dumps(data, indent=2))
         except Exception as e:
             logger.error("Failed to write to LTM JSON fallback", error=str(e))
+
 
     # ── User profile ────────────────────────────────────────────
 
@@ -281,7 +293,7 @@ class LongTermMemory:
                 "success": success,
                 "execution_time_ms": execution_time_ms,
                 "action_metadata": metadata or {},
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat()
             })
             if len(logs) > 100:
                 logs = logs[-100:]
@@ -364,7 +376,7 @@ class LongTermMemory:
                     "pattern_value": value,
                     "confidence": 0.5,
                     "occurrences": 1,
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat()
                 })
             data["learnt_patterns"] = patterns
             await self._write_fallback(data)

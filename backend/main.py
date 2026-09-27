@@ -4,7 +4,7 @@ WebSocket endpoint for real-time agent streaming + REST API
 """
 import sys
 import asyncio
-if sys.platform == 'win32':
+if sys.platform == 'win32' and sys.version_info < (3, 14):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import json
@@ -17,7 +17,7 @@ from typing import Optional
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 import httpx
 import edge_tts
@@ -65,15 +65,22 @@ async def lifespan(app: FastAPI):
                 f"Run: ollama pull {settings.OLLAMA_MODEL}"
             )
     else:
-        logger.warning(f"Ollama not reachable: {ollama_status.get('error')}. Run: ollama serve")
+        if settings.LLM_PROVIDER == "groq":
+            logger.info("Primary LLM: Groq Cloud API active (Local Ollama offline)")
+        else:
+            logger.info("Ollama offline — Run 'ollama serve' to enable local LLM fallback")
 
-    # Start Proactive Engine
+
+    # Start Proactive Engine & Living System Daemon
     await proactive_engine.start()
     await experience_compiler.start()
-    logger.info("JARVIS ready — Phase 3 Proactive Engine active")
+    from backend.services.living_daemon import living_daemon
+    living_daemon.start()
+    logger.info("JARVIS ready — Phase 3 Proactive Engine & Living System Daemon active")
     yield
 
     # Shutdown
+    living_daemon.stop()
     await experience_compiler.stop()
     await proactive_engine.stop()
     logger.info("JARVIS shutting down...")
@@ -654,7 +661,15 @@ async def text_to_speech(request: TTSRequest):
                     finally:
                         await response.aclose()
                         await client.aclose()
-                return StreamingResponse(stream_bytes(), media_type="audio/mpeg")
+                return StreamingResponse(
+                    stream_bytes(),
+                    media_type="audio/mpeg",
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Content-Disposition": "inline",
+                        "Access-Control-Allow-Origin": "*",
+                    }
+                )
             else:
                 error_detail = await response.aread()
                 logger.error(
@@ -823,6 +838,70 @@ def generate_dynamic_welcome_message(gender: str = "sir", client_tz: Optional[st
         return f"{greeting} {status}"
     else:
         return f"{greeting} {prompt}"
+
+
+# ── Google OAuth Endpoints ─────────────────────────────────────
+
+from backend.core.auth import auth_manager
+from fastapi.responses import RedirectResponse
+
+@app.get("/auth/google")
+async def google_auth_login(user_id: str = "default_user"):
+    """Redirect user to Google OAuth login screen."""
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(status_code=400, detail="Google Client ID and Secret are not configured in settings/env.")
+    auth_url, state = auth_manager.get_authorization_url(user_id=user_id)
+    if not auth_url:
+        raise HTTPException(status_code=400, detail=state)
+    return RedirectResponse(url=auth_url)
+
+@app.get("/auth/google/callback")
+async def google_auth_callback(code: str, state: str = "default_user"):
+    """Handle Google OAuth redirect callback."""
+    success = await auth_manager.handle_callback(code=code, user_id=state)
+    if success:
+        return {"success": True, "message": "Google Account linked successfully! You can close this window."}
+    else:
+        raise HTTPException(status_code=400, detail="Failed to authenticate with Google.")
+
+
+# ── Virtual Desktop API Endpoints ───────────────────────────────
+
+from backend.storage.virtual_desktop import desktop_manager
+
+
+@app.get("/api/desktop/files")
+async def get_desktop_files(category: Optional[str] = Query(None), search: Optional[str] = Query(None)):
+    """Fetch user's Virtual Desktop files and metadata."""
+    files = desktop_manager.list_files(category=category, search=search)
+    return {"success": True, "count": len(files), "files": files}
+
+@app.get("/api/desktop/file/{file_id}")
+async def serve_desktop_file(file_id: str):
+    """Stream or download a Virtual Desktop file by ID."""
+    record = desktop_manager.get_file_record(file_id)
+    if not record or not record.get("path"):
+        raise HTTPException(status_code=404, detail="Desktop file not found")
+    
+    path = record.get("path")
+    import os
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File missing on disk")
+
+    return FileResponse(
+        path=path,
+        filename=record.get("name"),
+        media_type="application/octet-stream" if record.get("category") != "images" else "image/png"
+    )
+
+@app.delete("/api/desktop/file/{file_id}")
+async def delete_desktop_file(file_id: str):
+    """Delete a file from Virtual Desktop."""
+    deleted = desktop_manager.delete_file(file_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Desktop file not found or already deleted")
+    return {"success": True, "message": "File removed from Virtual Desktop"}
+
 
 
 # ── WebSocket Endpoint ─────────────────────────────────────────

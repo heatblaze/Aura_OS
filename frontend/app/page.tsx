@@ -295,19 +295,33 @@ export default function JarvisPage() {
     isVoiceEnabledRef.current = isVoiceEnabled;
   }, [isVoiceEnabled]);
 
-  // Load voice toggle preference from localStorage
+  // Ensure voice response is enabled by default
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("isVoiceEnabled");
-      if (saved !== null) {
-        setIsVoiceEnabled(saved === "true");
-      }
+      setIsVoiceEnabled(true);
+      isVoiceEnabledRef.current = true;
+      localStorage.setItem("isVoiceEnabled", "true");
     }
   }, []);
 
-  // Unlock audio playback after first user interaction (handled in welcome click)
+  // Unlock audio playback on first user click/keydown/touch
   useEffect(() => {
-    // Left empty: Voice player is strictly locked until handleWelcomeClick is fired
+    const unlockAudio = () => {
+      userInteractedRef.current = true;
+      try {
+        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+        silentAudio.play().then(() => silentAudio.pause()).catch(() => {});
+      } catch {}
+    };
+
+    window.addEventListener("click", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+    window.addEventListener("touchstart", unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener("click", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
   }, []);
 
   const speechQueueRef = React.useRef<{ text: string; agentName: string; channel: string; alreadyDisplayed: boolean; vizData?: VizData | null }[]>([]);
@@ -355,7 +369,18 @@ export default function JarvisPage() {
       .replace(/\s+/g, " ")
       .trim();
 
+    let isFinished = false;
+    const fallbackTimeout = setTimeout(() => {
+      if (!isFinished) {
+        console.warn("Speech playback safety timeout reached. Unlocking speech queue.");
+        onSpeechFinished();
+      }
+    }, Math.min(25000, Math.max(4000, cleanText.length * 90)));
+
     const onSpeechFinished = () => {
+      if (isFinished) return;
+      isFinished = true;
+      clearTimeout(fallbackTimeout);
       speechQueueRef.current.shift();
       isSpeakingRef.current = false;
       processSpeechQueue();
@@ -378,9 +403,9 @@ export default function JarvisPage() {
     } catch {}
 
     const voiceMap: Record<string, string> = {
-      "jarvis": "21m00Tcm4TlvDq8ikWAM",  // Rachel -> en-US-AriaNeural
+      "jarvis": "21m00Tcm4TlvDq8ikWAM",  // Rachel -> en-US-AvaNeural
       "bobby": "86ZLAUcyPNBrbdJKn3u6",   // Growth -> en-US-ChristopherNeural
-      "claire": "c3QefzBhE1Cx4Yl23IV3",  // Systems -> en-US-GuyNeural (formerly Tom)
+      "claire": "c3QefzBhE1Cx4Yl23IV3",  // Systems -> en-US-JennyNeural
       "sarah": "zGjIP4SZlMnY9m93k97r",   // Support -> en-US-EmmaNeural
       "elena": "elena_voice_id_placeholder",
       "marcus": "marcus_voice_id_placeholder",
@@ -420,15 +445,25 @@ export default function JarvisPage() {
 
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
-      const ttsRes = await fetch(`${apiBase}/api/tts`, {
+      let ttsRes = await fetch(`${apiBase}/api/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: cleanText, voice_id: voiceId }),
-      });
+      }).catch(() => null);
 
-      if (ttsRes.ok) {
-        const blob = await ttsRes.blob();
-        if (blob.type.startsWith("audio/") && blob.size > 100) {
+      if (!ttsRes || !ttsRes.ok) {
+        const fallbackBase = apiBase.includes(":10000") ? apiBase.replace(":10000", ":8000") : "http://localhost:8000";
+        ttsRes = await fetch(`${fallbackBase}/api/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: cleanText, voice_id: voiceId }),
+        }).catch(() => null);
+      }
+
+      if (ttsRes && ttsRes.ok) {
+        const rawBlob = await ttsRes.blob();
+        if (rawBlob && rawBlob.size > 100) {
+          const blob = new Blob([rawBlob], { type: "audio/mpeg" });
           const audioUrl = URL.createObjectURL(blob);
           const audio = new Audio(audioUrl);
           currentAudioRef.current = audio;
@@ -444,38 +479,52 @@ export default function JarvisPage() {
           audio.onerror = () => {
             onSpeechFinished();
           };
-          await audio.play();
-          return;
+          try {
+            await audio.play();
+            return;
+          } catch (playErr) {
+            console.warn("Audio element play() blocked or failed:", playErr);
+            triggerAudioStartSync();
+            onSpeechFinished();
+            return;
+          }
         }
       }
     } catch (err) {
-      console.warn("TTS synthesis fallback to WebSpeech due to:", err);
+      console.warn("TTS synthesis error:", err);
     }
 
     if (typeof window !== "undefined" && window.speechSynthesis) {
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.rate = 1.15;
-      const voices = window.speechSynthesis.getVoices();
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(cleanText);
+        utterance.rate = 1.15;
+        const voices = window.speechSynthesis.getVoices();
 
-      const preferredVoice = voices.find(
-        (v) =>
-          v.lang.startsWith("en-") &&
-          (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha"))
-      ) || voices.find((v) => v.lang.startsWith("en-")) || voices[0];
+        const preferredVoice = voices.find(
+          (v) =>
+            v.lang.startsWith("en-") &&
+            (v.name.includes("Google") || v.name.includes("Natural") || v.name.includes("Samantha"))
+        ) || voices.find((v) => v.lang.startsWith("en-")) || voices[0];
 
-      if (preferredVoice) {
-        utterance.voice = preferredVoice;
-      }
-      utterance.onstart = () => {
+        if (preferredVoice) {
+          utterance.voice = preferredVoice;
+        }
+        utterance.onstart = () => {
+          triggerAudioStartSync();
+        };
+        utterance.onend = () => {
+          onSpeechFinished();
+        };
+        utterance.onerror = () => {
+          onSpeechFinished();
+        };
+        window.speechSynthesis.speak(utterance);
+      } catch (wsErr) {
+        console.warn("WebSpeech speak failed:", wsErr);
         triggerAudioStartSync();
-      };
-      utterance.onend = () => {
         onSpeechFinished();
-      };
-      utterance.onerror = () => {
-        onSpeechFinished();
-      };
-      window.speechSynthesis.speak(utterance);
+      }
     } else {
       triggerAudioStartSync();
       onSpeechFinished();
@@ -541,13 +590,17 @@ export default function JarvisPage() {
     const fetchStats = async () => {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-        const res = await fetch(`${apiBase}/system/stats`);
-        if (res.ok) {
+        let res = await fetch(`${apiBase}/system/stats`).catch(() => null);
+        if (!res || !res.ok) {
+          const fallbackBase = apiBase.includes(":10000") ? apiBase.replace(":10000", ":8000") : "http://localhost:8000";
+          res = await fetch(`${fallbackBase}/system/stats`).catch(() => null);
+        }
+        if (res && res.ok) {
           const data = await res.json();
           setLiveStats(data);
         }
       } catch (err) {
-        console.error("Failed to fetch live stats:", err);
+        console.warn("Failed to fetch live stats:", err);
       }
     };
     fetchStats();
@@ -973,6 +1026,7 @@ export default function JarvisPage() {
     const msg = text || input.trim();
     if (!msg) return;
     setInput("");
+    userInteractedRef.current = true;
 
     // Silence any active speech when user submits a new text message
     stopPlayback();

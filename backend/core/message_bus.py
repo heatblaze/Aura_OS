@@ -38,8 +38,8 @@ class MessageBus:
             )
             await self._redis.ping()
             logger.info("MessageBus connected to Redis", url=settings.REDIS_URL)
-        except Exception as e:
-            logger.warning("Redis unavailable, using in-memory fallback", error=str(e))
+        except Exception:
+            logger.info("Redis not detected — active with In-Memory fallback for MessageBus")
             self._use_fallback = True
 
     async def disconnect(self):
@@ -48,7 +48,9 @@ class MessageBus:
 
     async def publish(self, session_id: str, event: dict):
         """Publish an event to a session's stream."""
-        event["timestamp"] = datetime.utcnow().isoformat()
+        from datetime import timezone
+        event["timestamp"] = datetime.now(timezone.utc).isoformat()
+
         event["session_id"] = session_id
 
         if self._use_fallback:

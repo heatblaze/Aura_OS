@@ -227,7 +227,6 @@ def is_plan_read_only(plan: dict) -> bool:
 def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[str]:
     msg_clean = user_message.lower().strip()
     
-    # Coworker names mapping
     names_map = {
         "sarah": "#support-tickets",
         "bobby": "#business-operations",
@@ -239,7 +238,6 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
         "mia": "#product-roadmap"
     }
     
-    # Keyword to channel mapping
     switch_keywords = {
         "support": "#support-tickets",
         "growth": "#business-operations",
@@ -258,22 +256,36 @@ def detect_coworker_switch(user_message: str, current_channel: str) -> Optional[
     }
 
     import re
-    # Match explicit channel switch phrases or direct coworker name address/mentions
-    switch_patterns = [
+    # Match explicit channel switch commands (e.g. "switch to elena", "talk to marcus")
+    explicit_patterns = [
         r"\b(?:switch to|switch with|go to|talk to|speak with|open|take me to|switch channel to|switch over to)\s+(\w+)\b",
-        r"\b(?:can i talk to|can i speak with|let me talk to|let me speak with)\s+(\w+)\b",
-        r"\b(?:hey|hi|hello|ask|tell)?\s*(bobby|claire|sarah|elena|marcus|lex|mia)\b"
+        r"\b(?:can i talk to|can i speak with|let me talk to|let me speak with)\s+(\w+)\b"
     ]
-    for pattern in switch_patterns:
+    for pattern in explicit_patterns:
         match = re.search(pattern, msg_clean)
         if match:
             target = match.group(1)
-            if target in names_map:
-                return names_map[target]
-            if target in switch_keywords:
-                return switch_keywords[target]
-                
+            target_chan = names_map.get(target) or switch_keywords.get(target)
+            if target_chan and target_chan != current_channel:
+                return target_chan
+
+    # Direct coworker name invocation when NOT in that channel (e.g. user says "hey Elena" while in #general-chat)
+    name_match = re.search(r"\b(?:hey|hi|hello|ask|tell)?\s*(bobby|claire|sarah|elena|marcus|lex|mia)\b", msg_clean)
+    if name_match:
+        target_name = name_match.group(1)
+        target_chan = names_map.get(target_name)
+        if target_chan and target_chan != current_channel:
+            return target_chan
+
+    # Keyword routing ONLY from general chat
+    if current_channel == "#general-chat":
+        for kw, target_chan in switch_keywords.items():
+            if re.search(rf"\b{kw}\b", msg_clean) and target_chan != current_channel:
+                if any(w in msg_clean for w in ["ask", "tell", "switch", "route", "talk"]):
+                    return target_chan
+
     return None
+
 
 
 def format_natural_warning(warnings: list[str]) -> str:
@@ -776,47 +788,24 @@ class Orchestrator:
             # Emit a switch_channel event to notify the frontend
             await emit(session_id, "switch_channel", channel=target_channel)
             
-            # If the user command was simply to switch channel (e.g., "Switch to Sarah"), 
-            # return a direct welcome response from the target coworker immediately.
-            msg_clean_words = user_message.lower().strip().rstrip('?').rstrip('.').rstrip('!').split()
-            if len(msg_clean_words) <= 3:
-                target_persona = load_persona(target_channel)
-                target_name = target_persona["name"] if target_persona else "Jarvis"
-                response_text = f"I've switched to my channel, sir. How can I help you?" if target_name != "Jarvis" else "I'm here, sir. How can I assist you?"
-                
-                await emit(session_id, "final_response", content=response_text, agent=target_name)
-                
-                elapsed_ms = (time.monotonic() - start_time) * 1000
-                await emit(session_id, "pipeline_complete", elapsed_ms=round(elapsed_ms), response_preview=response_text[:100])
-                
-                return {
-                    "response": response_text,
-                    "intent": {"intent": "conversation", "category": "conversation", "requires_action": False},
-                    "command": {"strategy": "direct_response", "requires_tools": False},
-                    "plan": None,
-                    "execution_result": {"results": [], "all_success": True},
-                    "critic_verdict": {"verdict": "success"},
-                    "elapsed_ms": round(elapsed_ms)
-                }
-            else:
-                # Clean up coworker transition prefix (e.g., "Call Sarah and ask her to check meetings" -> "Check meetings")
-                import re
-                cleaned_msg = user_message
-                for name in ["sarah", "bobby", "claire", "jarvis", "elena", "marcus", "lex", "mia", "support", "growth", "business", "systems", "general", "design", "finance", "security", "roadmap"]:
-                    patterns = [
-                        rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+(?:and\s+ask\s+(?:her|him|them)\s+to|to|and)\s+",
-                        rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+to\s+",
-                        rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+and\s+",
-                        rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+"
-                    ]
-                    for pattern in patterns:
-                        match = re.search(pattern, cleaned_msg, re.IGNORECASE)
-                        if match:
-                            cleaned_msg = cleaned_msg[match.end():]
-                            break
-                if cleaned_msg.strip():
-                    user_message = cleaned_msg.strip()
-                    user_message = user_message[0].upper() + user_message[1:]
+            # Clean up coworker transition prefix (e.g., "Call Sarah and ask her to check meetings" -> "Check meetings")
+            import re
+            cleaned_msg = user_message
+            for name in ["sarah", "bobby", "claire", "jarvis", "elena", "marcus", "lex", "mia", "support", "growth", "business", "systems", "general", "design", "finance", "security", "roadmap"]:
+                patterns = [
+                    rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+(?:and\s+ask\s+(?:her|him|them)\s+to|to|and)\s+",
+                    rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+to\s+",
+                    rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+and\s+",
+                    rf"\b(?:call|switch to|switch with|go to|talk to|speak with|ask|tell)\s+{name}\s+"
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, cleaned_msg, re.IGNORECASE)
+                    if match:
+                        cleaned_msg = cleaned_msg[match.end():]
+                        break
+            if cleaned_msg.strip():
+                user_message = cleaned_msg.strip()
+                user_message = user_message[0].upper() + user_message[1:]
 
         channel = target_channel
         persona = load_persona(target_channel)
@@ -1138,8 +1127,8 @@ class Orchestrator:
 
             # ── Save conversation turn to Dual-Tier Persistent Memory ─────────────
             try:
-                await short_term_memory.append_history(session_id, "user", user_message)
-                await short_term_memory.append_history(session_id, "assistant", response_text)
+                await short_term_memory.append_message(session_id, "user", user_message)
+                await short_term_memory.append_message(session_id, "assistant", response_text)
                 await long_term_memory.save_interaction(session_id, user_message, response_text)
             except Exception as mem_err:
                 logger.warn("Memory save warning", error=str(mem_err))
@@ -1236,14 +1225,33 @@ IMPORTANT spoken-friendly rules:
             response = await self.commander.think(prompt, await _build_system_prompt(persona, session_id), session_id, expect_json=False)
             import re
             cleaned_response = re.sub(r"```(?:json|generate_image)?\s*\{[\s\S]*?\}\s*```", "", response).strip()
-            return cleaned_response if cleaned_response else (clean_text_facts[0] if clean_text_facts else "I've processed your request.")
+            if cleaned_response:
+                return cleaned_response
+            if clean_text_facts:
+                return clean_text_facts[0]
+            
+            # Persona-aligned intelligent default confirmations
+            agent_title = persona.get("name", "Jarvis") if persona else "Jarvis"
+            gender = await short_term_memory.get(session_id, "gender", "sir")
+            
+            # Image generation specific confirmation
+            if any(r.get("tool") == "generate_image" for r in execution_results.get("results", [])):
+                return f"I've designed and generated the visual asset for you, {gender}! I've displayed the card on your dashboard and saved the file directly to your Virtual Desktop."
+            
+            return f"I've completed that task for you, {gender}."
         except Exception as e:
+            gender = await short_term_memory.get(session_id, "gender", "sir")
             if clean_text_facts:
                 import re
                 clean_fact = re.sub(r"https?://\S+", "", " ".join(clean_text_facts))
                 clean_fact = re.sub(r"[{}\[\]'\"`]", "", clean_fact).strip()
                 return clean_fact[:400]
-            return "I've processed your request. Let me know if you need anything else."
+            
+            if any(r.get("tool") == "generate_image" for r in execution_results.get("results", [])):
+                return f"I've created your visual design, {gender}! The image card is live on screen and stored in your Virtual Desktop."
+            
+            return f"I've completed your request, {gender}."
+
 
     async def close(self):
         for agent in [self.memory_agent, self.commander, self.planner, self.executor, self.critic]:
