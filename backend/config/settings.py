@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     OLLAMA_MODEL: str = "phi3:mini"           # ~2.3GB RAM — good for 12GB systems
     OLLAMA_FALLBACK_MODEL: str = "llama3.2:3b" # Alternative if phi3 not installed
-    OLLAMA_TIMEOUT: int = 120                  # seconds
+    OLLAMA_TIMEOUT: int = 5                   # seconds (lowered from 120s so hosted environments never hang)
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"

@@ -315,7 +315,7 @@ class TwilioSmsTool(BaseTool):
 
 class TwilioCallTool(BaseTool):
     name = "twilio_call"
-    description = "Make phone calls via Twilio."
+    description = "Make phone calls via Twilio immediately, or schedule an automated call for a future time."
     requires_auth = True
 
     def is_configured(self) -> bool:
@@ -323,17 +323,56 @@ class TwilioCallTool(BaseTool):
 
     async def _run(self, params: dict) -> ToolResult:
         if not self.is_configured():
-            return ToolResult(success=False, error="Twilio credentials not configured")
+            return ToolResult(success=False, error="Twilio credentials not configured in settings or environment")
 
         to_number = params.get("to") or params.get("phone_number") or params.get("recipient")
         if not to_number:
             return ToolResult(success=False, error="Recipient phone number ('to' or 'phone_number') is required")
 
-        twiml = params.get("twiml") or params.get("message") or params.get("body") or "<Response><Say>Hello, this is a call from AURA OS.</Say></Response>"
+        msg_body = params.get("message") or params.get("body") or params.get("twiml") or "Hello, this is a call from AURA OS."
 
-        # If it's a plain message (not XML), wrap it in Say TwiML
-        if not twiml.strip().startswith("<"):
-            twiml = f"<Response><Say>{twiml}</Say></Response>"
+        # Check if caller requested scheduling for a specific future timestamp
+        run_at_raw = params.get("run_at") or params.get("scheduled_time") or params.get("time")
+        if run_at_raw:
+            try:
+                from datetime import datetime
+                from dateutil import parser as dt_parser
+                scheduled_dt = dt_parser.parse(str(run_at_raw))
+                now = datetime.now(scheduled_dt.tzinfo) if scheduled_dt.tzinfo else datetime.now()
+
+                if scheduled_dt > now:
+                    import uuid
+                    from backend.services.living_daemon import living_daemon
+                    task_id = f"call_{uuid.uuid4().hex[:8]}"
+                    clean_msg = msg_body if not str(msg_body).strip().startswith("<") else "Scheduled voice reminder from AURA OS"
+
+                    living_daemon.schedule_task(
+                        task_id=task_id,
+                        run_at=scheduled_dt,
+                        title=f"Call to {to_number}",
+                        details=clean_msg,
+                        place_call=True,
+                        recipient_phone=to_number
+                    )
+                    readable_time = scheduled_dt.strftime("%I:%M %p on %b %d, %Y (%Z)") if scheduled_dt.tzinfo else scheduled_dt.strftime("%I:%M %p on %b %d, %Y")
+                    logger.info("Scheduled future Twilio call", task_id=task_id, run_at=scheduled_dt.isoformat(), recipient=to_number)
+                    return ToolResult(
+                        success=True,
+                        data={
+                            "task_id": task_id,
+                            "status": "scheduled",
+                            "scheduled_time": scheduled_dt.isoformat(),
+                            "recipient": to_number,
+                            "details": f"Voice call successfully scheduled for {readable_time} to {to_number}."
+                        }
+                    )
+            except Exception as e:
+                logger.warning("Failed parsing scheduled time for call, proceeding to immediate call", error=str(e), run_at=run_at_raw)
+
+        # Immediate Call execution
+        twiml = msg_body
+        if not str(twiml).strip().startswith("<"):
+            twiml = f"<Response><Say voice='Polly.Amy'>{twiml}</Say></Response>"
 
         try:
             from twilio.rest import Client
@@ -343,7 +382,7 @@ class TwilioCallTool(BaseTool):
                 from_=settings.TWILIO_PHONE_NUMBER,
                 to=to_number,
             )
-            return ToolResult(success=True, data={"sid": call.sid, "status": call.status})
+            return ToolResult(success=True, data={"sid": call.sid, "status": call.status, "recipient": to_number})
         except Exception as e:
             return ToolResult(success=False, error=str(e))
 

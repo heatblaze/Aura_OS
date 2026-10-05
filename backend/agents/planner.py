@@ -43,7 +43,7 @@ Rules:
 - Note: The host operating system is Windows. When launching GUI applications (like file explorer, notepad, calc, etc.) via 'local_system', ALWAYS prefix the command with 'start ' (e.g. 'start explorer' or 'start notepad') to launch them detached and prevent command execution from blocking or timing out.
 - Steps must be atomic and verifiable
 - Set can_parallel=true for independent steps
-- Always include a fallback strategy. Fallbacks for messaging/delivery tools (like Gmail, twilio_sms, or twilio_call) must NOT involve automatic retries or infinite loop behaviors; they should notify the user of the failure and ask for manual correction or instructions.
+- For 'twilio_call', tool_params must include 'to' (the recipient's phone number in E.164 format, e.g. +91...) and 'message' (the spoken text). If the user requested the call at a specific future time or scheduled time (e.g. "at 12:37 AM", "in 15 minutes"), tool_params MUST also include 'run_at' with the target date & time formatted as an ISO 8601 string calculated from 'Current Time'. If no future time was requested, omit 'run_at' to place the call immediately.
 - If risk_level is "high", set requires_confirmation=true
 """
 

@@ -86,22 +86,33 @@ class LivingSystemDaemon:
             logger.error("Failed to place Twilio voice call", error=str(e))
             return False
 
-    def schedule_task(self, task_id: str, run_at: datetime, title: str, details: str, place_call: bool = True):
+    def schedule_task(self, task_id: str, run_at: datetime, title: str, details: str, place_call: bool = True, recipient_phone: Optional[str] = None):
         """Schedule a persistent task to execute at run_at timestamp."""
-        def _task_execution_wrapper(t_id, t_title, t_details, call_flag):
-            logger.info(f"[LivingSystemDaemon] Executing scheduled task: {t_title}")
-            if call_flag:
-                asyncio.run(self.trigger_phone_call_reminder(t_title, t_details))
-
         self.scheduler.add_job(
-            _task_execution_wrapper,
+            execute_scheduled_living_task,
             'date',
             run_date=run_at,
-            args=[task_id, title, details, place_call],
+            args=[task_id, title, details, place_call, recipient_phone],
             id=task_id,
             replace_existing=True
         )
-        logger.info("Scheduled living task", task_id=task_id, run_at=run_at.isoformat(), title=title)
+        logger.info("Scheduled living task", task_id=task_id, run_at=run_at.isoformat(), title=title, recipient=recipient_phone)
+
+
+# Top-level execution wrapper picklable by SQLAlchemyJobStore
+def execute_scheduled_living_task(task_id: str, title: str, details: str, place_call: bool = True, recipient_phone: Optional[str] = None):
+    logger.info(f"[LivingSystemDaemon] Executing scheduled task: {title}", task_id=task_id, recipient=recipient_phone)
+    if place_call:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(living_daemon.trigger_phone_call_reminder(title, details, recipient_phone=recipient_phone))
+            else:
+                loop.run_until_complete(living_daemon.trigger_phone_call_reminder(title, details, recipient_phone=recipient_phone))
+        except RuntimeError:
+            asyncio.run(living_daemon.trigger_phone_call_reminder(title, details, recipient_phone=recipient_phone))
+
 
 # Singleton instance
 living_daemon = LivingSystemDaemon()
+

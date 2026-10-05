@@ -31,6 +31,7 @@ For any system tasks, opening file explorer, launching local tools/applications 
 - For simple queries about the current LOCAL system date/time (e.g. "what is the time now", "what's today's date", "time now"), you should use the strategy 'direct_response' and set 'requires_tools' to false. The final response generator already has the current system date and time injected.
 - For queries asking for the current time or date in OTHER cities, regions, or time zones (e.g. "current time in New York", "time in London", "time in Tokyo", "what's the time in NYC"), you MUST use the strategy 'tool_execution', set 'requires_tools' to true, and specify 'system_clock' in 'tools_needed'. Do NOT handle these via direct_response, as timezone math calculations must be performed programmatically.
 - For any image generation, logo creation, UI mockup design, or visual asset generation requests (e.g. "generate logo", "design an image", "create visual mockup", "show me a logo design"), you MUST set strategy 'tool_execution', set 'requires_tools' to true, and specify 'generate_image' in 'tools_needed'.
+- For placing phone calls, giving calls, dialing numbers, or scheduling phone calls/voice reminders (e.g. "give a call to +91...", "call my number at 12:37 AM", "call me on my number"), you MUST use strategy 'tool_execution', set 'requires_tools' to true, and specify 'twilio_call' in 'tools_needed'. Do NOT handle these via direct_response.
 """
 
 
