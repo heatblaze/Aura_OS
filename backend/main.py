@@ -626,6 +626,12 @@ async def text_to_speech(request: TTSRequest):
     Generate speech audio from text using Deepgram, ElevenLabs, or Edge-TTS.
     If the selected provider fails, it automatically falls back to Edge-TTS.
     """
+    import re
+    # Strip emojis and pictographs so TTS engines never speak emoji names (like "wave") out loud
+    request.text = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27bf\ufe0f\u200d]", "", request.text or "").strip()
+    if not request.text:
+        request.text = "Understood."
+
     provider = getattr(settings, "TTS_PROVIDER", "edge-tts")
     
     # 1. Check if we should attempt Deepgram

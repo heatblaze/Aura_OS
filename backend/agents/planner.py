@@ -33,7 +33,7 @@ Always respond with valid JSON:
 }
 
 Rules:
-- Available tools: google_calendar, gmail, web_search, browser_automation, twilio_call, twilio_sms, local_system, system_clock
+- Available tools: google_calendar, gmail, web_search, browser_automation, twilio_call, twilio_sms, local_system, system_clock, generate_image
 - For checking timezone time, local time, or city clocks, directly utilize the 'system_clock' tool with the 'location' parameter (e.g. 'New York', 'UTC', or the user's local timezone like 'Asia/Kolkata'). If checking the user's current local time, set 'location' to the user's local timezone (e.g., 'Asia/Kolkata') rather than UTC. Do not write custom scripts or use shell/python commands.
 - Keep plans simple, direct, and minimal. Do NOT add credential checking/retrieval steps or write custom python/powershell scripts via 'local_system' for tools that have native capabilities (like 'google_calendar', 'gmail', 'twilio_call', 'twilio_sms', 'system_clock'). Always use the native tools directly.
 - For reading or searching calendar events, directly utilize the 'google_calendar' tool with "action": "read" and specify 'timeMin' and 'timeMax' parameters as ISO 8601 strings. Pay careful attention to the timezone offset in the 'Current Time' (e.g. 'UTC+05:30'). Convert user queries to timezone-aware ISO 8601 format (e.g., "2026-06-16T00:00:00+05:30") using the user's local timezone offset instead of assuming UTC ('Z'). Note that 12 AM is midnight (00:00:00) and 12 PM is noon (12:00:00). When checking events for a day or specific hour, ensure 'timeMin' starts at/before that time and 'timeMax' covers the target window (e.g. covering the hour, or extending 1-2 hours after the target time). Crucially, timeMax must always be strictly after timeMin; never set them to the exact same value, as Google Calendar API uses exclusive bounds and will filter all events out. Do NOT plan any other tools or scripts for calendar searches.
@@ -44,6 +44,7 @@ Rules:
 - Steps must be atomic and verifiable
 - Set can_parallel=true for independent steps
 - For 'twilio_call', tool_params must include 'to' (the recipient's phone number in E.164 format, e.g. +91...) and 'message' (the spoken text). If the user requested the call at a specific future time or scheduled time (e.g. "at 12:37 AM", "in 15 minutes"), tool_params MUST also include 'run_at' with the target date & time formatted as an ISO 8601 string calculated from 'Current Time'. If no future time was requested, omit 'run_at' to place the call immediately.
+- For any image, picture, photo, view, wallpaper, logo, or visual mockup request, create a single step with tool 'generate_image' and tool_params {"prompt": "<clear visual description of what the user asked for>"}. Set risk_level to "low" and requires_confirmation to false. Do NOT add extra steps to display or save the image, as 'generate_image' automatically saves to the Virtual Desktop and pops up the visual viewer.
 - If risk_level is "high", set requires_confirmation=true
 """
 

@@ -94,80 +94,87 @@ class LLMClient:
 
         if use_groq and keys_to_try:
             override = current_model_override.get()
-            model = override or settings.GROQ_MODEL or "openai/gpt-oss-20b"
-            if not model or "llama-3.1-8b" in model.lower() or "llama3.1" in model.lower():
-                model = "openai/gpt-oss-20b"
+            primary_model = override or settings.GROQ_MODEL or "openai/gpt-oss-20b"
+            if not primary_model or "llama-3.1-8b" in primary_model.lower() or "llama3.1" in primary_model.lower():
+                primary_model = "openai/gpt-oss-20b"
 
-            for idx, key in enumerate(keys_to_try):
-                key_id = f"groq_key_{idx}"
-                health = self._get_health(key_id)
+            # Groq tracks rate limits (TPM/RPM) independently per model.
+            # If the primary model bucket is rate-limited, automatically rotate to versatile/instant models.
+            candidate_models = []
+            for m in (primary_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+                if m and m not in candidate_models:
+                    candidate_models.append(m)
 
-                if not health.is_available:
-                    remaining = round(health.cooldown_until - time.monotonic(), 1)
-                    logger.info("Groq key currently in cooldown, checking next", key_index=idx, remaining_sec=remaining)
-                    continue
+            for model in candidate_models:
+                for idx, key in enumerate(keys_to_try):
+                    key_id = f"groq_key_{idx}:{model}"
+                    health = self._get_health(key_id)
 
-                logger.info("Routing prompt to Groq Cloud", agent=agent_name, key_index=idx)
-                headers = {
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json"
-                }
-                payload: Dict[str, Any] = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "stream": False
-                }
-                if json_mode:
-                    payload["response_format"] = {"type": "json_object"}
+                    if not health.is_available:
+                        remaining = round(health.cooldown_until - time.monotonic(), 1)
+                        logger.debug("Groq key+model in cooldown, checking next", key_index=idx, model=model, remaining_sec=remaining)
+                        continue
 
-                # Allow 1 immediate retry on 429 if the wait is brief (<= 3 seconds)
-                max_retries = 1
-                for attempt in range(max_retries + 1):
-                    try:
-                        async with httpx.AsyncClient() as client:
-                            response = await client.post(self._groq_url, json=payload, headers=headers, timeout=15.0)
+                    logger.info("Routing prompt to Groq Cloud", agent=agent_name, key_index=idx, model=model)
+                    headers = {
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload: Dict[str, Any] = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "stream": False
+                    }
+                    if json_mode:
+                        payload["response_format"] = {"type": "json_object"}
 
-                            if response.status_code == 200:
-                                health.mark_success()
-                                data = response.json()
-                                content = data["choices"][0]["message"]["content"]
-                                if session_id and agent_name:
-                                    await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
-                                return content
+                    # Allow 1 immediate retry on 429 if the wait is brief (<= 3 seconds)
+                    max_retries = 1
+                    for attempt in range(max_retries + 1):
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                response = await client.post(self._groq_url, json=payload, headers=headers, timeout=15.0)
 
-                            elif response.status_code == 429:
-                                # Groq returned rate limit. Read Retry-After header if present.
-                                retry_header = response.headers.get("retry-after")
-                                retry_sec = 2.0
-                                if retry_header:
-                                    try:
-                                        retry_sec = float(retry_header)
-                                    except ValueError:
-                                        pass
+                                if response.status_code == 200:
+                                    health.mark_success()
+                                    data = response.json()
+                                    content = data["choices"][0]["message"]["content"]
+                                    if session_id and agent_name:
+                                        await emit(session_id, "agent_response", agent=agent_name.lower(), content=content[:500])
+                                    return content
 
-                                logger.warning(
-                                    "Groq 429 rate limit hit",
-                                    agent=agent_name,
-                                    attempt=attempt + 1,
-                                    retry_seconds=retry_sec
-                                )
+                                elif response.status_code == 429:
+                                    retry_header = response.headers.get("retry-after")
+                                    retry_sec = 2.0
+                                    if retry_header:
+                                        try:
+                                            retry_sec = float(retry_header)
+                                        except ValueError:
+                                            pass
 
-                                # If wait time is reasonable and we have an attempt remaining, wait & retry!
-                                if attempt < max_retries and retry_sec <= 3.0:
-                                    await asyncio.sleep(retry_sec)
-                                    continue
+                                    logger.warning(
+                                        "Groq 429 rate limit hit",
+                                        agent=agent_name,
+                                        model=model,
+                                        attempt=attempt + 1,
+                                        retry_seconds=retry_sec
+                                    )
+
+                                    if attempt < max_retries and retry_sec <= 3.0:
+                                        await asyncio.sleep(retry_sec)
+                                        continue
+                                    else:
+                                        health.mark_rate_limited(retry_sec)
+                                        break  # Move to next key or next Groq model bucket
                                 else:
-                                    health.mark_rate_limited(retry_sec)
-                                    break  # Move to next key or next provider
-                            else:
-                                logger.warning("Groq API returned non-200 status", status=response.status_code, key_index=idx)
-                                health.mark_failure(cooldown_seconds=20.0)
-                                break
-                    except Exception as e:
-                        logger.warning("Groq API request error", error=str(e), key_index=idx)
-                        health.mark_failure(cooldown_seconds=15.0)
-                        break
+                                    logger.warning("Groq API returned non-200 status", status=response.status_code, key_index=idx, model=model)
+                                    health.mark_failure(cooldown_seconds=20.0)
+                                    break
+                        except Exception as e:
+                            logger.warning("Groq API request error", error=str(e), key_index=idx, model=model)
+                            health.mark_failure(cooldown_seconds=15.0)
+                            break
 
         # ── 2. NVIDIA NIM Cloud Fallback Engine ────────────────────────────────
         if settings.NVIDIA_API_KEY:
@@ -268,7 +275,8 @@ class LLMClient:
                 )
             return '{"summary": "Direct conversational response", "strategy": "direct_response", "requires_tools": false, "tools_needed": []}'
 
-        return "AURA OS is online. Telephony, daemon, and core operating subsystems remain synchronized."
+        # Return empty string on non-JSON exhaustion so orchestrator synthesizes a natural context-aware reply
+        return ""
 
 
 llm_client = LLMClient()

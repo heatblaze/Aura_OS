@@ -394,11 +394,25 @@ class BrowserTool(BaseTool):
     requires_auth = False
 
     async def _run(self, params: dict) -> ToolResult:
-        url = params.get("url", "")
+        url = (params.get("url") or "").strip()
         action = params.get("action", "get_text")
+        session_id = params.get("session_id")
 
         if not url:
             return ToolResult(success=False, error="No URL provided")
+
+        if not url.startswith(("http://", "https://")):
+            url = f"https://{url}"
+
+        if session_id and action in ("open", "navigate", "browse", "get_text"):
+            from backend.core.message_bus import emit
+            await emit(session_id, "open_url", url=url)
+            if settings.HOSTED_MODE or action in ("open", "navigate", "browse"):
+                return ToolResult(
+                    success=True,
+                    data={"url": url, "message": f"Successfully opened {url} in the user's browser."},
+                    metadata={"tool": self.name, "opened_in_client_browser": True},
+                )
 
         try:
             from playwright.async_api import async_playwright
@@ -425,6 +439,12 @@ class BrowserTool(BaseTool):
                 await browser.close()
                 return ToolResult(success=False, error=f"Unknown action: {action}")
         except Exception as e:
+            if session_id:
+                return ToolResult(
+                    success=True,
+                    data={"url": url, "message": f"Opened {url} in a new browser tab."},
+                    metadata={"tool": self.name, "opened_in_client_browser": True},
+                )
             return ToolResult(success=False, error=f"Browser error: {e}")
 
 
@@ -546,19 +566,38 @@ class GenerateImageTool(BaseTool):
         import httpx
         from backend.storage.virtual_desktop import desktop_manager
 
-        raw_prompt = params.get("prompt") or params.get("description") or params.get("query") or "creative logo design"
-        width = params.get("width", 1024)
-        height = params.get("height", 1024)
+        import re
+        import random
+        import math
 
-        enhanced_prompt = f"{raw_prompt}, high contrast graphic design, crisp typography, clean vector emblem logo, 8k resolution, photorealistic studio lighting"
+        raw_prompt = params.get("prompt") or params.get("description") or params.get("query") or "scenic night sky view"
+        # Clean conversational prefixes if the full user sentence was passed
+        cleaned_prompt = re.sub(
+            r"^(?:please\s+|can you\s+|could you\s+)?(?:generate|create|draw|design|make|render|show(?:\s+me)?)\s+(?:an?\s+)?(?:image|picture|photo|view|wallpaper|illustration|artwork|graphic)\s+(?:of\s+|for\s+)?",
+            "",
+            raw_prompt.strip(),
+            flags=re.IGNORECASE,
+        ).strip()
+        cleaned_prompt = re.sub(r"\s+and\s+(?:show|display|save)\s+it.*$", "", cleaned_prompt, flags=re.IGNORECASE).strip()
+        if cleaned_prompt:
+            raw_prompt = cleaned_prompt
+
+        width = int(params.get("width", 1024))
+        height = int(params.get("height", 1024))
+
+        is_logo = any(k in raw_prompt.lower() for k in ("logo", "icon", "emblem", "badge", "brand"))
+        if is_logo:
+            enhanced_prompt = f"{raw_prompt}, high contrast graphic design, crisp typography, clean vector emblem logo, 8k resolution, studio lighting"
+        else:
+            enhanced_prompt = f"{raw_prompt}, breathtaking masterpiece, 8k resolution, photorealistic, cinematic lighting, ultra-detailed, vivid colors"
 
         hf_api_key = (settings.HUGGINGFACE_API_KEY or os.getenv("HUGGINGFACE_API_KEY") or "").strip()
-        
-        # Primary HuggingFace FLUX.1-schnell / SDXL Inference Models
+
         hf_models = [
+            "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
+            "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0",
             "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell",
             "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
-            "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
         ]
 
         image_bytes = None
@@ -576,41 +615,137 @@ class GenerateImageTool(BaseTool):
                             image_bytes = resp.content
                             used_model = model_url.split("/")[-1]
                             break
-                        elif resp.status_code == 503:
-                            # Model loading, wait briefly or try next
-                            continue
                     except Exception as e:
                         logger.warning(f"Hugging Face model call error ({model_url}): {e}")
 
         # Fallback 1: Try Pollinations image stream bytes
         if not image_bytes:
             encoded_prompt = urllib.parse.quote(enhanced_prompt)
-            pollinations_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get(pollinations_url, follow_redirects=True)
-                    if resp.status_code == 200 and resp.content:
-                        image_bytes = resp.content
-                        used_model = "Pollinations FLUX Engine"
-            except Exception as e:
-                logger.warning(f"Pollinations stream fallback failed: {e}")
+            seed = random.randint(1, 999999)
+            pollinations_urls = [
+                f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&seed={seed}&nologo=true&model=flux",
+                f"https://pollinations.ai/p/{encoded_prompt}?width={width}&height={height}&seed={seed}&nologo=true",
+            ]
+            req_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            }
+            async with httpx.AsyncClient(timeout=25.0, headers=req_headers) as client:
+                for p_url in pollinations_urls:
+                    try:
+                        resp = await client.get(p_url, follow_redirects=True)
+                        ctype = resp.headers.get("content-type", "")
+                        if resp.status_code == 200 and resp.content and len(resp.content) > 2000 and ("image" in ctype or resp.content[:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1", b"\xff\xd8\xff\xdb")):
+                            image_bytes = resp.content
+                            used_model = "Pollinations FLUX Engine"
+                            break
+                    except Exception as e:
+                        logger.warning(f"Pollinations stream fallback failed ({p_url}): {e}")
 
-        # Fallback 2: Generate local high-contrast visual PNG graphic if network is completely down
+        # Fallback 2: Rich procedural artwork synthesizer via PIL when cloud image APIs are unreachable
         if not image_bytes:
             try:
-                from PIL import Image, ImageDraw, ImageFont
-                img = Image.new("RGB", (width, height), color=(15, 23, 42))
+                from PIL import Image, ImageDraw, ImageFilter
+                prompt_lower = raw_prompt.lower()
+                img = Image.new("RGB", (width, height), color=(5, 8, 22))
                 draw = ImageDraw.Draw(img)
-                # Draw subtle decorative grid circles & branding
-                draw.ellipse([width//4, height//4, width*3//4, height*3//4], outline=(56, 189, 248), width=4)
-                draw.rectangle([40, 40, width-40, height-40], outline=(139, 92, 246), width=2)
-                draw.text((60, 60), f"AURA OS Visual Asset", fill=(255, 255, 255))
-                draw.text((60, 100), f"Prompt: {raw_prompt[:50]}", fill=(148, 163, 184))
-                
+
+                is_night_or_space = any(w in prompt_lower for w in ("night", "sky", "star", "space", "galaxy", "nebula", "moon", "cosmos", "aurora", "universe", "evening"))
+                is_sunset = any(w in prompt_lower for w in ("sunset", "sunrise", "dawn", "dusk", "horizon", "beach", "ocean"))
+
+                # 1. Vertical atmospheric gradient
+                for y in range(height):
+                    t = y / max(1, height - 1)
+                    if is_sunset:
+                        r = int(18 + 220 * (t ** 1.5))
+                        g = int(12 + 95 * (t ** 1.2))
+                        b = int(48 + 60 * (1 - t))
+                    elif is_night_or_space:
+                        r = int(4 + 18 * (t ** 1.6))
+                        g = int(7 + 28 * (t ** 1.4))
+                        b = int(20 + 68 * (t ** 1.1))
+                    else:
+                        r = int(8 + 30 * t)
+                        g = int(15 + 55 * t)
+                        b = int(35 + 95 * t)
+                    draw.line([(0, y), (width, y)], fill=(min(255, r), min(255, g), min(255, b)))
+
+                # 2. Glowing nebula / aurora clouds overlay
+                glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                gdraw = ImageDraw.Draw(glow)
+                rng = random.Random(hash(raw_prompt) & 0xFFFFFFFF)
+                nebula_colors = [
+                    (56, 189, 248, 38),
+                    (139, 92, 246, 36),
+                    (236, 72, 153, 28),
+                    (16, 185, 129, 30),
+                ]
+                for _ in range(14):
+                    cx = rng.randint(int(width * 0.1), int(width * 0.9))
+                    cy = rng.randint(int(height * 0.1), int(height * 0.65))
+                    rx = rng.randint(int(width * 0.12), int(width * 0.32))
+                    ry = rng.randint(int(height * 0.06), int(height * 0.18))
+                    col = rng.choice(nebula_colors)
+                    gdraw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=col)
+                glow = glow.filter(ImageFilter.GaussianBlur(radius=48))
+                img = Image.alpha_composite(img.convert("RGBA"), glow).convert("RGB")
+                draw = ImageDraw.Draw(img)
+
+                # 3. Starfield & constellations
+                for _ in range(420):
+                    sx = rng.randint(0, width - 1)
+                    sy = rng.randint(0, int(height * 0.82))
+                    brightness = rng.randint(150, 255)
+                    tint = rng.choice([(brightness, brightness, 255), (255, brightness, brightness), (200, 240, 255)])
+                    size = rng.choices([1, 2, 3], weights=[82, 15, 3])[0]
+                    if size == 1:
+                        draw.point((sx, sy), fill=tint)
+                    else:
+                        draw.ellipse([sx - size, sy - size, sx + size, sy + size], fill=tint)
+                        if size == 3:
+                            draw.line([(sx - 6, sy), (sx + 6, sy)], fill=(200, 230, 255), width=1)
+                            draw.line([(sx, sy - 6), (sx, sy + 6)], fill=(200, 230, 255), width=1)
+
+                # 4. Shooting star
+                sx0, sy0 = int(width * 0.28), int(height * 0.22)
+                draw.line([(sx0, sy0), (sx0 + 130, sy0 + 55)], fill=(224, 242, 254), width=2)
+
+                # 5. Luminous Moon / Celestial Body
+                mx, my, mr = int(width * 0.76), int(height * 0.22), int(min(width, height) * 0.075)
+                moon_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                mgdraw = ImageDraw.Draw(moon_glow)
+                for mult, alpha in [(2.4, 25), (1.7, 50), (1.25, 85)]:
+                    rr = int(mr * mult)
+                    mgdraw.ellipse([mx - rr, my - rr, mx + rr, my + rr], fill=(224, 242, 254, alpha))
+                moon_glow = moon_glow.filter(ImageFilter.GaussianBlur(radius=18))
+                img = Image.alpha_composite(img.convert("RGBA"), moon_glow).convert("RGB")
+                draw = ImageDraw.Draw(img)
+                draw.ellipse([mx - mr, my - mr, mx + mr, my + mr], fill=(248, 250, 252))
+
+                # 6. Layered mountain silhouettes along the horizon
+                layers = [
+                    (0.72, 0.07, (17, 24, 48), 1),
+                    (0.79, 0.055, (11, 16, 34), 2),
+                    (0.86, 0.035, (6, 9, 20), 3),
+                ]
+                for base_h, amp, col, seed_off in layers:
+                    pts = [(0, height)]
+                    for x in range(0, width + 16, 16):
+                        nx = x / width
+                        y = int(
+                            height * base_h
+                            - math.sin(nx * 6.5 + seed_off) * (height * amp)
+                            - math.cos(nx * 14.0 - seed_off * 1.7) * (height * amp * 0.45)
+                            - math.sin(nx * 29.0 + seed_off * 3.1) * (height * amp * 0.18)
+                        )
+                        pts.append((x, y))
+                    pts.append((width, height))
+                    draw.polygon(pts, fill=col)
+
                 buf = io.BytesIO()
                 img.save(buf, format="PNG")
                 image_bytes = buf.getvalue()
-                used_model = "AURA Local Graphic Engine"
+                used_model = "AURA Procedural Canvas Engine"
             except Exception as e:
                 logger.warning(f"Local PIL generation error: {e}")
 

@@ -45,6 +45,7 @@ Intent names (use these exactly):
 - manage_tasks: Task/to-do management
 - system_control: Control system settings
 - system_command: Open local folders, files, file explorer, notepad, or run desktop shell commands
+- generate_image: Generate, create, draw, render, or design an image, picture, photo, view, wallpaper, logo, or visual mockup
 - conversation: General chat or questions
 - unknown: Cannot determine intent
 
@@ -81,7 +82,31 @@ class IntentEngine:
             "okay", "sure", "cancel", "stop", "good morning", "good afternoon",
             "good evening", "thank you", "thanks", "bye", "goodbye", "help"
         }
-        action_keywords = {"open", "run", "start", "launch", "execute", "close", "kill", "system", "cmd", "powershell"}
+        # Fast deterministic detection for image/visual generation requests
+        img_verbs = ("generate", "create", "draw", "design", "make", "render", "paint", "show")
+        img_nouns = ("image", "picture", "photo", "wallpaper", "view", "logo", "mockup", "illustration", "artwork", "graphic", "poster", "icon")
+        words_set = set(msg_clean.split())
+        if (any(v in words_set for v in img_verbs) and any(n in msg_clean for n in img_nouns)) or any(
+            phrase in msg_clean for phrase in (
+                "generate an image", "generate image", "create an image", "create image",
+                "draw a", "draw an", "picture of", "image of", "photo of", "generate a logo", "design a logo"
+            )
+        ):
+            logger.info("Image generation intent detected via deterministic check", message=user_message)
+            return {
+                "intent": "generate_image",
+                "confidence": 0.98,
+                "entities": {"prompt": user_message},
+                "priority": "medium",
+                "category": "productivity",
+                "requires_action": True,
+                "sentiment": "neutral",
+                "language": "en",
+                "raw_message": user_message,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        action_keywords = {"open", "run", "start", "launch", "execute", "close", "kill", "system", "cmd", "powershell", "generate", "create", "draw", "design", "image", "logo"}
         is_action = any(kw in msg_clean.split() for kw in action_keywords)
         if msg_clean in conversational_phrases or (len(msg_clean.split()) <= 2 and not is_action):
             logger.info("Intent extraction fast-path bypass triggered", message=user_message)
@@ -149,6 +174,7 @@ Extract the intent. Return ONLY the JSON object, no other text."""
         """Rule-based fallback when LLM fails."""
         message_lower = message.lower()
         intent_map = [
+            (("generate image", "generate an image", "create image", "create an image", "image of", "picture of", "photo of", "draw", "logo", "mockup", "wallpaper"), "generate_image"),
             (("explorer", "notepad", "notes", "terminal", "cmd", "command", "system", "app", "application", "calc", "calculator", "file", "folder"), "system_command"),
             (("schedule", "meeting", "appointment", "calendar", "book"), "schedule_event"),
             (("email", "send", "mail", "compose"), "send_email"),
