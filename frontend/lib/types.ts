@@ -34,6 +34,7 @@ export type EventType =
   | "disconnected"
   | "final_response"
   | "switch_channel"
+  | "open_url"
   | "error";
 
 export interface JarvisEvent {
