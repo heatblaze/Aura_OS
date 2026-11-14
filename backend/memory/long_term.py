@@ -314,6 +314,28 @@ class LongTermMemory:
             session.add(log)
             await session.commit()
 
+    async def save_interaction(
+        self,
+        session_id: str,
+        user_message: str,
+        response_text: str,
+        user_id: str = "default_user",
+        intent: str = "conversation",
+    ):
+        """Persist a user-assistant conversation turn into Long-Term Memory."""
+        await self.log_action(
+            session_id=session_id,
+            user_id=user_id,
+            intent=intent,
+            tool_used=None,
+            success=True,
+            execution_time_ms=None,
+            metadata={
+                "user_message": (user_message or "")[:500],
+                "assistant_response": (response_text or "")[:1000],
+            },
+        )
+
     async def get_recent_actions(self, user_id: str, limit: int = 20) -> list[dict]:
         if not self._available:
             return []

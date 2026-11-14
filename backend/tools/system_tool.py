@@ -24,14 +24,82 @@ class LocalSystemTool(BaseTool):
         # Always available on the local machine
         return True
 
+    @staticmethod
+    def _extract_url(command: str) -> Optional[str]:
+        import re
+        if not command:
+            return None
+        # 1. Explicit http:// or https:// URL anywhere in the command
+        m = re.search(r'(https?://[^\s"\'<>]+)', command, re.IGNORECASE)
+        if m:
+            return m.group(1).rstrip('.,;"\')')
+        # 2. Launch/browser command with a bare domain (e.g. 'start youtube.com', 'start chrome www.github.com')
+        cmd_lower = command.lower()
+        if any(k in cmd_lower for k in ("start ", "open ", "xdg-open", "chrome", "msedge", "firefox", "brave", "explorer")):
+            dom = re.search(
+                r'\b((?:www\.)?[a-zA-Z0-9-]+\.(?:com|org|net|io|ai|in|co|edu|gov|dev|app|tv|me)(?:/[^\s"\'<>]*)?)',
+                command,
+                re.IGNORECASE,
+            )
+            if dom:
+                candidate = dom.group(1).rstrip('.,;"\')')
+                if not candidate.lower().endswith((".exe", ".bat", ".cmd", ".ps1", ".py", ".sh")):
+                    return f"https://{candidate}"
+        return None
+
+    @staticmethod
+    async def _resolve_youtube_video_if_applicable(url: str) -> str:
+        """If URL is a YouTube search query for a specific video, resolve the top video watch URL when possible."""
+        import re
+        import httpx
+        if "youtube.com/results?search_query=" not in url:
+            return url
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+            async with httpx.AsyncClient(timeout=3.0, headers=headers, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.text:
+                    match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', resp.text)
+                    if match:
+                        video_id = match.group(1)
+                        return f"https://www.youtube.com/watch?v={video_id}"
+        except Exception as e:
+            logger.debug("YouTube direct video resolution skipped, using search URL", error=str(e))
+        return url
+
     async def _run(self, params: dict) -> ToolResult:
         command = params.get("command")
         timeout = params.get("timeout", 30)  # Default 30s timeout
+        session_id = params.get("session_id")
 
         if not command:
             return ToolResult(success=False, error="No command provided.")
 
+        # Detect if this command opens a website/URL and bridge it to the client browser via WebSocket
+        target_url = self._extract_url(command)
+        if target_url:
+            target_url = await self._resolve_youtube_video_if_applicable(target_url)
+            if session_id:
+                from backend.core.message_bus import emit
+                logger.info("Emitting open_url event to client browser", url=target_url, session_id=session_id)
+                await emit(session_id, "open_url", url=target_url)
+
         if settings.HOSTED_MODE:
+            if target_url:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "command": command,
+                        "opened_url": target_url,
+                        "stdout": f"Successfully opened {target_url} in a new browser tab.",
+                        "stderr": "",
+                        "exit_code": 0,
+                    },
+                    metadata={"tool": self.name, "opened_in_client_browser": True},
+                )
             logger.info("Hosted mode active: simulating command execution", command=command)
             cmd_lower = command.lower().strip()
             stdout_str = ""

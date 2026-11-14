@@ -807,8 +807,7 @@ class Orchestrator:
                 user_message = cleaned_msg.strip()
                 user_message = user_message[0].upper() + user_message[1:]
 
-        channel = target_channel
-        persona = load_persona(target_channel)
+        persona = load_persona(channel)
         active_agent_name = persona["name"] if persona else "Jarvis"
 
         await emit(session_id, "pipeline_start", message=f"{active_agent_name} activated", user_message=user_message, agent=active_agent_name)
@@ -993,7 +992,23 @@ class Orchestrator:
 
             print("⏳ Step 3: Determining strategy decision...")
             # ── Step 3: Commander decision ──────────────────────
-            if intent.get("intent") == "conversation" and not intent.get("requires_action"):
+            if intent.get("intent") == "generate_image":
+                command = {
+                    "summary": f"Generate image: {user_message}",
+                    "strategy": "tool_execution",
+                    "requires_tools": True,
+                    "tools_needed": ["generate_image"],
+                    "priority": "medium",
+                    "can_execute_autonomously": True,
+                    "clarification_question": None,
+                    "context_notes": "Deterministic image generation routing."
+                }
+                await emit(session_id, "commander_decision",
+                           agent=self.commander.name,
+                           strategy="tool_execution",
+                           tools=["generate_image"],
+                           summary=command["summary"])
+            elif intent.get("intent") == "conversation" and not intent.get("requires_action"):
                 command = {
                     "summary": "Conversational reply",
                     "strategy": "direct_response",
@@ -1027,7 +1042,38 @@ class Orchestrator:
 
             if command and command.get("requires_tools") and command.get("strategy") != "direct_response":
                 print("⏳ Step 4: Formulating step plan...")
-                plan = await self.planner.process(enriched_context, session_id)
+                if intent.get("intent") == "generate_image" or command.get("tools_needed") == ["generate_image"]:
+                    plan = {
+                        "plan_id": "plan_img_001",
+                        "steps": [
+                            {
+                                "step_id": 1,
+                                "description": f"Generate visual asset for: {user_message}",
+                                "tool": "generate_image",
+                                "tool_params": {"prompt": user_message},
+                                "depends_on": [],
+                                "can_parallel": False,
+                                "estimated_duration_ms": 2000,
+                                "fallback": "Use local procedural graphic synthesis"
+                            }
+                        ],
+                        "total_steps": 1,
+                        "requires_confirmation": False,
+                        "confirmation_message": None,
+                        "risk_level": "low"
+                    }
+                    await emit(
+                        session_id,
+                        "plan_created",
+                        agent=self.planner.name,
+                        plan_id=plan["plan_id"],
+                        total_steps=1,
+                        steps=[plan["steps"][0]["description"]],
+                        requires_confirmation=False,
+                        risk_level="low",
+                    )
+                else:
+                    plan = await self.planner.process(enriched_context, session_id)
                 enriched_context["plan"] = plan
 
                 print("⏳ Step 4.5: Simulating tool actions...")
@@ -1107,6 +1153,18 @@ class Orchestrator:
             if active_agent_name in {"Marcus", "Lex", "Mia", "Elena", "Bobby"}:
                 viz_hint = _extract_viz_hint(response_text, active_agent_name, intent)
 
+            # Strip any hallucinated bare markdown image tags like ![Night Sky View] without a URL
+            import re as _re
+            response_text = _re.sub(r"!\[[^\]]*\](?!\()", "", response_text).strip()
+
+            # ── Save conversation turn to Dual-Tier Persistent Memory (before appending base64 image) ──
+            try:
+                await short_term_memory.append_message(session_id, "user", user_message)
+                await short_term_memory.append_message(session_id, "assistant", response_text)
+                await long_term_memory.save_interaction(session_id, user_message, response_text)
+            except Exception as mem_err:
+                logger.warn("Memory save warning", error=str(mem_err))
+
             # Check if any tool result returned an image asset (e.g. GenerateImageTool)
             for r in execution_result.get("results", []):
                 res_val = r.get("result")
@@ -1125,13 +1183,6 @@ class Orchestrator:
                         if img_url and img_url not in response_text:
                             response_text += f"\n\n![{img_prompt}]({img_url})"
 
-            # ── Save conversation turn to Dual-Tier Persistent Memory ─────────────
-            try:
-                await short_term_memory.append_message(session_id, "user", user_message)
-                await short_term_memory.append_message(session_id, "assistant", response_text)
-                await long_term_memory.save_interaction(session_id, user_message, response_text)
-            except Exception as mem_err:
-                logger.warn("Memory save warning", error=str(mem_err))
 
             await emit(session_id, "final_response", content=response_text, agent=active_agent_name, viz_hint=viz_hint)
             
@@ -1190,7 +1241,14 @@ class Orchestrator:
             if r.get("success"):
                 if isinstance(res_val, dict):
                     data_obj = res_val.get("data")
-                    if isinstance(data_obj, dict) and "results" in data_obj and isinstance(data_obj["results"], list):
+                    if isinstance(data_obj, dict) and (data_obj.get("viz_type") == "image" or "image_url" in data_obj):
+                        data_str = (
+                            f"Successfully generated image for prompt '{data_obj.get('prompt', '')}' "
+                            f"using {data_obj.get('model_used', 'AURA Image Engine')} and saved it to "
+                            f"Virtual Desktop Storage Explorer under Images as '{data_obj.get('file_name', 'image.png')}' "
+                            f"(file ID: {data_obj.get('file_id', '')}). The visual preview panel is now open on screen."
+                        )
+                    elif isinstance(data_obj, dict) and "results" in data_obj and isinstance(data_obj["results"], list):
                         # Cleanly extract search result snippets for consumer readability
                         snippets = []
                         for item in data_obj["results"]:
@@ -1219,36 +1277,50 @@ Generate a clear, natural, consumer-friendly response to the user.
 IMPORTANT spoken-friendly rules:
 1. Speak naturally as a helpful AI assistant. Do NOT include technical jargon, code keys, URLs, or raw dictionaries.
 2. NEVER output raw JSON code blocks, JSON tool calls, or ```json ... ``` blocks in your speech or text output.
-3. Provide direct, simplified answers (e.g. state stock prices or facts directly in 1-2 clear sentences)."""
+3. Provide direct, simplified answers (e.g. state stock prices or facts directly in 1-2 clear sentences).
+4. Do NOT use emojis or emoticons, as your response is read aloud by a voice synthesizer."""
 
         try:
             response = await self.commander.think(prompt, await _build_system_prompt(persona, session_id), session_id, expect_json=False)
             import re
             cleaned_response = re.sub(r"```(?:json|generate_image)?\s*\{[\s\S]*?\}\s*```", "", response).strip()
-            if cleaned_response:
+            if cleaned_response and "core operating subsystems remain synchronized" not in cleaned_response:
                 return cleaned_response
+
+            gender = await short_term_memory.get(session_id, "gender", "sir")
+
+            # Check if an image was generated
+            for r in execution_result.get("results", []):
+                res_val = r.get("result")
+                if isinstance(res_val, dict) and res_val.get("success"):
+                    d = res_val.get("data", {})
+                    if isinstance(d, dict) and (d.get("viz_type") == "image" or "image_url" in d):
+                        prompt_desc = d.get("prompt", "your visual request")
+                        return f"Here is the visual for {prompt_desc}, {gender}. I have opened the preview on your screen and saved a copy in your Virtual Desktop Storage Explorer."
+                    if isinstance(d, dict) and d.get("opened_url"):
+                        return f"I've opened {d.get('opened_url')} in a new browser tab for you, {gender}."
+
             if clean_text_facts:
-                return clean_text_facts[0]
+                return f"Here is what I found, {gender}: {clean_text_facts[0]}" 
             
             # Persona-aligned intelligent default confirmations
             agent_title = persona.get("name", "Jarvis") if persona else "Jarvis"
             gender = await short_term_memory.get(session_id, "gender", "sir")
             
             # Image generation specific confirmation
-            if any(r.get("tool") == "generate_image" for r in execution_results.get("results", [])):
-                return f"I've designed and generated the visual asset for you, {gender}! I've displayed the card on your dashboard and saved the file directly to your Virtual Desktop."
+            if any(r.get("tool") == "generate_image" for r in execution_result.get("results", [])):
+                return f"I've generated the visual for you, {gender}. It is now displayed on your screen and saved in your Virtual Desktop Storage Explorer."
             
             return f"I've completed that task for you, {gender}."
         except Exception as e:
             gender = await short_term_memory.get(session_id, "gender", "sir")
+            if any(r.get("tool") == "generate_image" for r in execution_result.get("results", [])):
+                return f"I've generated your image, {gender}. The visual window is open on your screen and the file is saved in your Virtual Desktop Storage Explorer."
             if clean_text_facts:
                 import re
                 clean_fact = re.sub(r"https?://\S+", "", " ".join(clean_text_facts))
                 clean_fact = re.sub(r"[{}\[\]'\"`]", "", clean_fact).strip()
                 return clean_fact[:400]
-            
-            if any(r.get("tool") == "generate_image" for r in execution_results.get("results", [])):
-                return f"I've created your visual design, {gender}! The image card is live on screen and stored in your Virtual Desktop."
             
             return f"I've completed your request, {gender}."
 

@@ -353,6 +353,9 @@ export default function JarvisPage() {
   async function playSpeechItem(text: string, agentName: string, channel: string, alreadyDisplayed: boolean, vizData: VizData | null = null) {
     // Filter out markdown formatting markers, URLs, & code dictionary keys for consumer voice clarity
     let cleanText = text
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, "") // Strip markdown images (including data:image base64 URIs) before bracket removal
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Strip markdown links before bracket removal
+      .replace(/data:image\/[^\s)]+/gi, "") // Strip any standalone data:image URIs
       .replace(/Simulation Warning:/gi, "")
       .replace(/I must warn you that:/gi, "")
       .replace(/Confirmation: Response Received/gi, "")
@@ -366,6 +369,7 @@ export default function JarvisPage() {
       .replace(/^[=\-*\s]{3,}$/gm, "") // Clean divider lines like ===, ---, ***
       .replace(/[=*#_`>~\-"']/g, "")   // Clean formatting marks
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, "") // Strip emojis so TTS never speaks "wave" etc.
       .replace(/\s+/g, " ")
       .trim();
 
@@ -417,12 +421,12 @@ export default function JarvisPage() {
 
     // Standard 1-on-1 mode: Render text instantly without waiting for audio network payload
     if (!isConference) {
-      setActiveChannel(channel);
+      if (!alreadyDisplayed) {
+        setActiveChannel(channel);
+        addMessage(channel, "assistant", text, agentName);
+      }
       if (vizData) {
         setVizPanelData(vizData);
-      }
-      if (!alreadyDisplayed) {
-        addMessage(channel, "assistant", text, agentName);
       }
     }
 
@@ -433,8 +437,8 @@ export default function JarvisPage() {
           addMessage(channel, "assistant", text, agentName);
         }
       } else {
-        setActiveChannel(channel);
         if (!alreadyDisplayed) {
+          setActiveChannel(channel);
           addMessage(channel, "assistant", text, agentName);
         }
       }
@@ -914,6 +918,21 @@ export default function JarvisPage() {
         if (targetChannel && !conferenceSessionRef.current) {
           setActiveChannel(targetChannel);
         }
+      } else if (event.type === "open_url") {
+        const ev = event as any;
+        const targetUrl = ev.url || ev.data?.url;
+        if (targetUrl && typeof window !== "undefined") {
+          const opened = window.open(targetUrl, "_blank", "noopener,noreferrer");
+          if (!opened) {
+            const link = document.createElement("a");
+            link.href = targetUrl;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          }
+        }
       }
     });
 
@@ -970,7 +989,7 @@ export default function JarvisPage() {
             });
           };
 
-          const imgMatch = line.match(/!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/);
+          const imgMatch = line.match(/!\[([^\]]*)\]\(((?:https?:\/\/|data:image\/|\/api\/desktop\/file\/)[^\)]+)\)/);
           if (imgMatch) {
             return (
               <div key={lineIdx} style={{ margin: "8px 0", borderRadius: "12px", overflow: "hidden", border: "1px solid rgba(0,212,255,0.2)", background: "#050814", maxWidth: "440px", boxShadow: "0 4px 20px rgba(0,0,0,0.5)" }}>

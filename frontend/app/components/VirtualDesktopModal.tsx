@@ -34,6 +34,7 @@ export default function VirtualDesktopModal({ isOpen, onClose }: VirtualDesktopM
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState<DesktopFile | null>(null);
   const [isMaximized, setIsMaximized] = useState(false);
+  const [resolvedApiBase, setResolvedApiBase] = useState<string>(API_BASE);
 
   const fetchFiles = async () => {
     setLoading(true);
@@ -43,9 +44,14 @@ export default function VirtualDesktopModal({ isOpen, onClose }: VirtualDesktopM
       if (searchQuery) params.append("search", searchQuery);
 
       let res = await fetch(`${API_BASE}/api/desktop/files?${params.toString()}`).catch(() => null);
-      if (!res || !res.ok) {
+      if (res && res.ok) {
+        setResolvedApiBase(API_BASE);
+      } else {
         const fallbackBase = API_BASE.includes(":10000") ? API_BASE.replace(":10000", ":8000") : "http://localhost:8000";
         res = await fetch(`${fallbackBase}/api/desktop/files?${params.toString()}`).catch(() => null);
+        if (res && res.ok) {
+          setResolvedApiBase(fallbackBase);
+        }
       }
       if (res && res.ok) {
         const data = await res.json();
@@ -295,7 +301,7 @@ export default function VirtualDesktopModal({ isOpen, onClose }: VirtualDesktopM
                   <div style={{ marginBottom: "8px", height: "40px", display: "flex", alignItems: "center", justifyContent: "center" }}>
                     {file.category === "images" ? (
                       <img
-                        src={`${API_BASE}/api/desktop/file/${file.id}`}
+                        src={`${resolvedApiBase}/api/desktop/file/${file.id}`}
                         alt={file.name}
                         style={{ width: "42px", height: "42px", objectFit: "cover", borderRadius: "4px", border: "1px solid #334155" }}
                         onError={(e) => {
@@ -365,7 +371,7 @@ export default function VirtualDesktopModal({ isOpen, onClose }: VirtualDesktopM
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <span>Selected: <strong style={{ color: "#94a3b8" }}>{selectedFile.name}</strong></span>
                 <a
-                  href={`${API_BASE}/api/desktop/file/${selectedFile.id}`}
+                  href={`${resolvedApiBase}/api/desktop/file/${selectedFile.id}`}
                   target="_blank"
                   download={selectedFile.name}
                   style={{ color: "#38bdf8", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
